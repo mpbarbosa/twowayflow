@@ -1,6 +1,15 @@
 import { flow } from "@twowayflow/dsl";
 
 /**
+ * ┌─────────────────────────────────────────────────────────────────────────────────────────────┐
+ * │ Name         orders-etl                                                                     │
+ * │ Type         Flow graph — linear pipeline (source → transform → filter → sink)              │
+ * │ Project      twowayflow                                                                     │
+ * │ Description  Reads an orders CSV, parses each line into a row, drops the incomplete rows    │
+ * │              and upserts the rest into the `orders` table. The smallest shape the DSL has   │
+ * │              to support, and the file the canvas drag was verified against.                 │
+ * └─────────────────────────────────────────────────────────────────────────────────────────────┘
+ *
  * A plain linear ETL pipeline: read a CSV, clean it, write it to a database.
  *
  * Everything the canvas touches is on the surface — `kind`, `at`, and the two string ids in

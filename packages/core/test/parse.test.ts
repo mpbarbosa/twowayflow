@@ -162,11 +162,11 @@ describe("node descriptions", () => {
     expect(parse(SRC).unknownLinks).toEqual([]);
   });
 
-  it("reads the descriptions carried by the pessoa-rag example", () => {
-    const nodes = specOf(parse(example("pessoa-rag.flow.ts"))).nodes;
+  it("reads the descriptions carried by the sensor-fusion example", () => {
+    const nodes = specOf(parse(example("sensor-fusion.flow.ts"))).nodes;
 
     expect(nodes.every((n) => n.description !== undefined && n.description.length > 0)).toBe(true);
-    expect(nodes.find((n) => n.id === "fundirRrf")!.description).toContain("reciprocal rank");
+    expect(nodes.find((n) => n.id === "resample")!.description).toContain("every third frame");
   });
 });
 

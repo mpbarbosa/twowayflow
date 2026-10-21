@@ -140,7 +140,7 @@ const cases: Case[] = [
   [
     "the graph the canvas is sent carries each node's description",
     async () => {
-      const document = await openExample("pessoa-rag.flow.ts");
+      const document = await openExample("sensor-fusion.flow.ts");
       await vscode.commands.executeCommand("twowayflow.openCanvas");
 
       const parser = await getParser(wasmPaths());
@@ -155,8 +155,8 @@ const cases: Case[] = [
         "every node in the example should reach the canvas described",
       );
       assert.match(
-        graph.nodes.find((n) => n.id === "fundirRrf")!.description!,
-        /reciprocal rank/,
+        graph.nodes.find((n) => n.id === "resample")!.description!,
+        /every third frame/,
         "the description should be the file's own prose, not the label or the id",
       );
     },
