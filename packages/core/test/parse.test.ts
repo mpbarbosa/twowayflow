@@ -120,6 +120,56 @@ describe("opaque payload", () => {
   });
 });
 
+describe("node descriptions", () => {
+  const SRC = [
+    'import { flow } from "@twowayflow/dsl";',
+    "",
+    'export default flow("described")',
+    '  .node("plain", { kind: "source", at: [0, 0] })',
+    '  .node("told", {',
+    '    kind: "transform",',
+    "    at: [240, 0],",
+    '    label: "tidy",',
+    '    description: "Drops rows the schema cannot explain, and says so in the log.",',
+    "    params: { strict: true },",
+    "  })",
+    '  .node("accented", { description: "mesure de débit — 100% / 2" })',
+    '  .node("computed", { description: "half " + "a description" })',
+    '  .edge("plain", "told");',
+    "",
+  ].join("\n");
+
+  it("reads a description the way it reads a label", () => {
+    const file = parse(SRC);
+
+    expect(file.diagnostics).toEqual([]);
+    const byId = new Map(specOf(file).nodes.map((n) => [n.id, n]));
+    expect(byId.get("told")!.description).toBe(
+      "Drops rows the schema cannot explain, and says so in the log.",
+    );
+    expect(byId.get("accented")!.description).toBe("mesure de débit — 100% / 2");
+  });
+
+  it("leaves a node without one undescribed rather than inventing a fallback", () => {
+    const byId = new Map(specOf(parse(SRC)).nodes.map((n) => [n.id, n]));
+    expect(byId.get("plain")!.description).toBeUndefined();
+  });
+
+  it("ignores a description the patcher could not rewrite, and still reads the node", () => {
+    const byId = new Map(specOf(parse(SRC)).nodes.map((n) => [n.id, n]));
+    expect(byId.get("computed")).toBeDefined();
+    expect(byId.get("computed")!.description).toBeUndefined();
+    expect(parse(SRC).unknownLinks).toEqual([]);
+  });
+
+  it("reads the descriptions carried by the pessoa-rag example", () => {
+    const nodes = specOf(parse(example("pessoa-rag.flow.ts"))).nodes;
+
+    expect(nodes.every((n) => n.description !== undefined && n.description.length > 0)).toBe(true);
+    expect(nodes.find((n) => n.id === "fundirRrf")!.description).toContain("reciprocal rank");
+  });
+});
+
 describe("declared edge ids", () => {
   const SRC = [
     'import { flow } from "@twowayflow/dsl";',

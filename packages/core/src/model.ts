@@ -54,6 +54,8 @@ export interface FlowNode {
   readonly idSpan: Span;
   readonly kind?: NodeKind;
   readonly label?: string;
+  /** Prose for the canvas to show on hover. Read, never written: no gesture edits one. */
+  readonly description?: string;
   readonly position?: Position;
   /** The `[x, y]` array literal including brackets. Moving replaces exactly this. */
   readonly positionSpan?: Span;
@@ -156,6 +158,7 @@ export interface FlowGraphSpec {
     readonly id: string;
     readonly kind?: NodeKind;
     readonly label?: string;
+    readonly description?: string;
     readonly position?: Position;
   }[];
   readonly edges: readonly {
@@ -174,6 +177,7 @@ export function specOf(file: FlowFile): FlowGraphSpec {
       id: n.id,
       ...(n.kind === undefined ? {} : { kind: n.kind }),
       ...(n.label === undefined ? {} : { label: n.label }),
+      ...(n.description === undefined ? {} : { description: n.description }),
       ...(n.position === undefined ? {} : { position: n.position }),
     })),
     edges: file.edges.map((e) => ({

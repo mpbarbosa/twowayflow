@@ -362,6 +362,7 @@ function parseNodeLink(
 
   const kindText = stringProperty(options, "kind");
   const label = stringProperty(options, "label");
+  const description = stringProperty(options, "description");
   const position = options ? positionLiteral(objectProperty(options, "at")) : undefined;
 
   return {
@@ -370,6 +371,7 @@ function parseNodeLink(
       idSpan: id.span,
       ...(kindText !== undefined && KINDS.has(kindText) ? { kind: kindText as NodeKind } : {}),
       ...(label === undefined ? {} : { label }),
+      ...(description === undefined ? {} : { description }),
       ...(position
         ? { position: { x: position.x, y: position.y }, positionSpan: position.span }
         : {}),

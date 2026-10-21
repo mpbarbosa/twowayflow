@@ -188,6 +188,37 @@ describe("code -> design", () => {
   });
 });
 
+describe("node descriptions", () => {
+  const DESCRIBED = [
+    'import { flow } from "@twowayflow/dsl";',
+    "",
+    'export default flow("described")',
+    '  .node("read", { kind: "source", at: [0, 0], description: "Reads yesterday\'s export." })',
+    '  .node("work", { kind: "transform", at: [240, 0] })',
+    '  .edge("read", "work");',
+    "",
+  ].join("\n");
+
+  it("sends the description to the canvas, which is what the hover shows", async () => {
+    await openPanel(DESCRIBED);
+
+    const graph = harness.lastGraph()!;
+    expect(graph.nodes.find((n) => n.id === "read")!.description).toBe("Reads yesterday's export.");
+    // A node without one is sent without one, so the canvas can tell "no description" from "".
+    expect(graph.nodes.find((n) => n.id === "work")!.description).toBeUndefined();
+  });
+
+  it("leaves the description alone when the node is dragged", async () => {
+    await openPanel(DESCRIBED);
+    await harness.fromWebview({ type: "moveNode", nodeId: "read", position: { x: 40, y: 80 } });
+
+    expect(harness.document.getText()).toBe(DESCRIBED.replace("[0, 0]", "[40, 80]"));
+    expect(harness.lastGraph()!.nodes.find((n) => n.id === "read")!.description).toBe(
+      "Reads yesterday's export.",
+    );
+  });
+});
+
 describe("selection sync", () => {
   it("maps a text cursor inside a node's span back to that node", async () => {
     await openPanel();

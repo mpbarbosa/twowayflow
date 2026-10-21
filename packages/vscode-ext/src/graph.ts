@@ -22,6 +22,7 @@ export function toCanvasGraph(file: FlowFile, revision: number): CanvasGraph {
         id: node.id,
         ...(node.kind === undefined ? {} : { kind: node.kind }),
         ...(node.label === undefined ? {} : { label: node.label }),
+        ...(node.description === undefined ? {} : { description: node.description }),
         position,
         span: node.link.span,
         hasExplicitPosition: node.position !== undefined,

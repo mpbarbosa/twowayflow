@@ -31,6 +31,7 @@ function toReactFlow(
       label: node.label ?? node.id,
       kind: node.kind ?? "transform",
       nodeId: node.id,
+      ...(node.description === undefined ? {} : { description: node.description }),
       inSync: node.id === cursorNodeId,
     },
   }));

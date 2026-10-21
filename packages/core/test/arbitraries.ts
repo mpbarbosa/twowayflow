@@ -45,6 +45,9 @@ const arbGraphShape = fc.record({
         id: arbId,
         kind: arbKind,
         label: arbLabel,
+        // Nothing the canvas does writes a description, which is exactly why it is generated:
+        // every patch property then asserts that editing a node leaves its prose alone.
+        description: arbLabel,
         position: arbPosition,
       },
       { requiredKeys: ["id"] },
@@ -272,6 +275,7 @@ export function renderFlow(spec: FlowGraphSpec, style: RenderStyle): Rendered {
       entries.push(["at", `[${node.position.x}, ${node.position.y}]`]);
     }
     if (node.label !== undefined) entries.push(["label", literal(node.label)]);
+    if (node.description !== undefined) entries.push(["description", literal(node.description)]);
     const optionStyle = style.nodeStyles[i % style.nodeStyles.length]!;
     links.push(`.node(${literal(node.id)}${renderOptions(optionStyle, entries, i)})`);
   });

@@ -11,8 +11,8 @@ export interface Position {
 /**
  * Options on a `.node(...)` link.
  *
- * `kind`, `at` and `label` are the only keys the canvas reads. Everything else is opaque
- * payload for whatever runtime executes the flow, and the patcher is required to leave it
+ * `kind`, `at`, `label` and `description` are the only keys the canvas reads. Everything else is
+ * opaque payload for whatever runtime executes the flow, and the patcher is required to leave it
  * byte-for-byte alone. See docs/dsl.md.
  */
 export interface NodeOptions {
@@ -20,6 +20,13 @@ export interface NodeOptions {
   /** Canvas position as `[x, y]`. Optional: absent means "auto-layout me". */
   readonly at?: readonly [number, number];
   readonly label?: string;
+  /**
+   * Prose about what this node does, shown by the canvas when the pointer rests on the node.
+   *
+   * Read by the canvas but never written by it: there is no gesture that edits a description, so
+   * the one in the file is the only one there is.
+   */
+  readonly description?: string;
   /** Opaque, runtime-defined payload. Never touched by the canvas or the patcher. */
   readonly [key: string]: unknown;
 }

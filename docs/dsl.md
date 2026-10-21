@@ -50,7 +50,11 @@ carried through untouched**.
 | `kind` | node | `"source" \| "transform" \| "filter" \| "fanout" \| "join" \| "sink"` | node shape/colour, handle layout |
 | `at` | node | `[x, y]` | canvas position |
 | `label` | node, edge | `string` | display text (falls back to the id) |
+| `description` | node | `string` | prose shown when the pointer rests on the node |
 | `id` | edge | `string` | this edge's identity, when it needs one of its own (below) |
+
+`description` is the one key the canvas reads but never writes: no gesture creates or edits one,
+so the prose in the file is the only prose there is, and every patch leaves it where it was.
 
 Any other property — `params`, `run`, `schema`, `retries`, an inline arrow function, whatever the
 runtime grows later — is **opaque to the canvas**. The parser records its byte range only so the
