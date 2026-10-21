@@ -1,0 +1,77 @@
+{
+  "name": "twowayflow-vscode",
+  "displayName": "twowayflow",
+  "description": "Editable dataflow canvas over *.flow.ts files. The code is the only source of truth.",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "publisher": "twowayflow",
+  "license": "MIT",
+  "engines": {
+    "vscode": "^1.90.0"
+  },
+  "categories": [
+    "Visualization",
+    "Programming Languages"
+  ],
+  "main": "./dist/extension.cjs",
+  "activationEvents": [],
+  "contributes": {
+    "commands": [
+      {
+        "command": "twowayflow.openCanvas",
+        "title": "twowayflow: Open Flow Canvas",
+        "icon": "$(type-hierarchy)"
+      }
+    ],
+    "menus": {
+      "editor/title": [
+        {
+          "command": "twowayflow.openCanvas",
+          "when": "resourceFilename =~ /\\.flow\\.ts$/",
+          "group": "navigation"
+        }
+      ],
+      "commandPalette": [
+        {
+          "command": "twowayflow.openCanvas",
+          "when": "resourceFilename =~ /\\.flow\\.ts$/"
+        }
+      ]
+    },
+    "configuration": {
+      "title": "twowayflow",
+      "properties": {
+        "twowayflow.revealOnCanvasSelect": {
+          "type": "boolean",
+          "default": true,
+          "description": "Reveal the source range in the text editor when a canvas node is selected."
+        }
+      }
+    }
+  },
+  "scripts": {
+    "build": "node esbuild.mjs",
+    "watch": "node esbuild.mjs --watch",
+    "typecheck": "tsc --build",
+    "build:integration": "node esbuild.mjs --integration",
+    "test:integration": "node esbuild.mjs && node esbuild.mjs --integration && node integration/runTests.mjs"
+  },
+  "dependencies": {
+    "@twowayflow/core": "workspace:*",
+    "@twowayflow/dsl": "workspace:*",
+    "@vscode/tree-sitter-wasm": "0.3.1",
+    "web-tree-sitter": "0.27.1"
+  },
+  "devDependencies": {
+    "@types/node": "24.11.0",
+    "@types/react": "19.3.0",
+    "@types/react-dom": "19.3.0",
+    "@types/vscode": "1.90.0",
+    "@vscode/test-electron": "2.5.2",
+    "@xyflow/react": "12.12.0",
+    "esbuild": "0.28.2",
+    "react": "19.3.1",
+    "react-dom": "19.3.1"
+  }
+}

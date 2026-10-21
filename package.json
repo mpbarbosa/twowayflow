@@ -1,0 +1,27 @@
+{
+  "name": "twowayflow",
+  "private": true,
+  "type": "module",
+  "version": "0.0.0",
+  "description": "IDE for two-way design <-> code workflows over dataflow graphs",
+  "license": "MIT",
+  "packageManager": "pnpm@10.34.7",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:integration": "pnpm --filter twowayflow-vscode run test:integration",
+    "typecheck": "tsc --build --force",
+    "build": "pnpm --filter twowayflow-vscode run build",
+    "format": "biome format --write .",
+    "lint": "biome check .",
+    "check": "biome check . && pnpm run typecheck && pnpm run test"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "2.5.15",
+    "typescript": "5.9.3",
+    "vitest": "5.0.5"
+  }
+}

@@ -1,0 +1,16 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Run twowayflow extension",
+      "type": "extensionHost",
+      "request": "launch",
+      "args": [
+        "--extensionDevelopmentPath=${workspaceFolder}/packages/vscode-ext",
+        "${workspaceFolder}/examples"
+      ],
+      "outFiles": ["${workspaceFolder}/packages/vscode-ext/dist/**/*.cjs"],
+      "preLaunchTask": "npm: build"
+    }
+  ]
+}
