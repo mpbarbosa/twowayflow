@@ -532,3 +532,80 @@ describe("a patch is never a whole-file rewrite", () => {
     );
   });
 });
+
+// --------------------------------------------------------------------------------------------
+// Property 9 — parallel edges under batched deletes
+// --------------------------------------------------------------------------------------------
+
+describe("parallel edges survive batched deletes", () => {
+  /**
+   * `arbGraph` produces parallel edges only by chance, and a batch that deletes two of them by
+   * chance on top of that — which is why a real divergence here survived a 12000-run pass.
+   *
+   * This constructs the case deliberately: several edges between one pair, each independently
+   * declared or undeclared, with an arbitrary subset deleted in a single batch. Undeclared
+   * edges are identified positionally, so this is precisely the shape where the model and the
+   * patcher can disagree about which edge an id names.
+   */
+  const arbParallelCase = fc
+    .tuple(
+      fc.array(fc.boolean(), { minLength: 2, maxLength: 5 }),
+      fc.array(fc.boolean(), { minLength: 5, maxLength: 5 }),
+      arbRenderStyle,
+    )
+    .map(([declared, deleteMask, style]) => ({
+      spec: {
+        name: "parallel",
+        nodes: [
+          { id: "a", kind: "source" as const, position: { x: 0, y: 0 } },
+          { id: "b", kind: "sink" as const, position: { x: 240, y: 0 } },
+        ],
+        edges: declared.map((isDeclared, i) => ({
+          from: "a",
+          to: "b",
+          ...(isDeclared ? { id: `e${i}` } : {}),
+        })),
+      },
+      deleteMask,
+      style,
+    }));
+
+  it("patch and model agree for any subset deleted in one batch", () => {
+    fc.assert(
+      fc.property(arbParallelCase, ({ spec, deleteMask, style }) => {
+        const { source } = renderFlow(spec, style);
+        const file = parse(source);
+
+        // The file must read back as the graph it was rendered from before anything is deleted,
+        // or the rest of this proves nothing.
+        expect(specOf(file)).toEqual(spec);
+
+        const ids = file.edges.map((e) => e.id);
+        const ops: FlowOp[] = ids
+          .filter((_, i) => deleteMask[i % deleteMask.length])
+          .map((edgeId) => ({ op: "deleteEdge", edgeId }));
+        if (ops.length === 0) return;
+
+        const patched = applyPatch(file, ops).source;
+        expect(specOf(parse(patched))).toEqual(applyOpsToSpec(specOf(file), ops));
+        expect(extractComments(patched)).toEqual(extractComments(source));
+      }),
+      config,
+    );
+  });
+
+  it("deleting every parallel edge leaves none behind", () => {
+    fc.assert(
+      fc.property(arbParallelCase, ({ spec, style }) => {
+        const { source } = renderFlow(spec, style);
+        const file = parse(source);
+        const ops: FlowOp[] = file.edges.map((e) => ({ op: "deleteEdge", edgeId: e.id }));
+
+        const patched = applyPatch(file, ops).source;
+        expect(specOf(parse(patched)).edges).toEqual([]);
+        expect(specOf(parse(patched))).toEqual(applyOpsToSpec(specOf(file), ops));
+      }),
+      config,
+    );
+  });
+});

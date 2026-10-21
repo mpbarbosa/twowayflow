@@ -483,6 +483,12 @@ function survivingRestOfLine(
 type SpecNode = FlowGraphSpec["nodes"][number];
 type SpecEdge = FlowGraphSpec["edges"][number];
 
+/** A model edge plus the identity it had when the batch was computed. */
+interface TrackedEdge {
+  readonly edge: SpecEdge;
+  readonly id: string;
+}
+
 /**
  * Apply the same ops to the span-free model.
  *
@@ -493,7 +499,25 @@ type SpecEdge = FlowGraphSpec["edges"][number];
  */
 export function applyOpsToSpec(spec: FlowGraphSpec, ops: readonly FlowOp[]): FlowGraphSpec {
   let nodes: SpecNode[] = [...spec.nodes];
-  let edges: SpecEdge[] = [...spec.edges];
+
+  // Edge identity is resolved ONCE, against the spec the ops were computed against, and then
+  // carried. It is not recomputed per op.
+  //
+  // This is what makes the model agree with the patcher. An undeclared edge is identified
+  // positionally (`a->b`, `a->b#1`, ...), so removing one sibling renumbers the rest.
+  // `patch()` resolves every op's spans against a single snapshot, so a batch naming both
+  // `a->b` and `a->b#1` deletes both links. A model that recomputed ids after the first
+  // delete would find no `a->b#1` left and silently keep that edge — the two then disagree on
+  // what the same batch meant. Resolving up front removes the disagreement by construction
+  // rather than forbidding the batch.
+  const initialIds = edgeIds(spec.edges);
+  let tracked: TrackedEdge[] = spec.edges.map((edge, i) => ({ edge, id: initialIds[i]! }));
+
+  // Edges the batch itself adds cannot be named by a `deleteEdge` in the same batch unless they
+  // declared an id (`batchIsSafe` in the property suite rejects that collision). An undeclared
+  // one gets a marker containing NUL, which `isPlainLiteralBody` forbids, so it can never
+  // collide with a caller-supplied id.
+  let addedCount = 0;
 
   for (const op of ops) {
     switch (op.op) {
@@ -511,15 +535,21 @@ export function applyOpsToSpec(spec: FlowGraphSpec, ops: readonly FlowOp[]): Flo
       }
       case "deleteNode": {
         nodes = nodes.filter((n) => n.id !== op.id);
-        edges = edges.filter((e) => e.from !== op.id && e.to !== op.id);
+        // By endpoint, not by id: a node's incident edges go with it whatever identifies them.
+        tracked = tracked.filter((t) => t.edge.from !== op.id && t.edge.to !== op.id);
         break;
       }
       case "renameNode": {
         nodes = nodes.map((n) => (n.id === op.id ? { ...n, id: op.newId } : n));
-        edges = edges.map((e) => ({
-          ...e,
-          ...(e.from === op.id ? { from: op.newId } : {}),
-          ...(e.to === op.id ? { to: op.newId } : {}),
+        // The carried id deliberately does not change. A `deleteEdge` in this batch was formed
+        // against the pre-rename ids, which is exactly what it must still match.
+        tracked = tracked.map((t) => ({
+          ...t,
+          edge: {
+            ...t.edge,
+            ...(t.edge.from === op.id ? { from: op.newId } : {}),
+            ...(t.edge.to === op.id ? { to: op.newId } : {}),
+          },
         }));
         break;
       }
@@ -528,26 +558,33 @@ export function applyOpsToSpec(spec: FlowGraphSpec, ops: readonly FlowOp[]): Flo
         break;
       }
       case "addEdge": {
-        edges = [
-          ...edges,
+        addedCount += 1;
+        tracked = [
+          ...tracked,
           {
-            from: op.from,
-            to: op.to,
-            ...(op.id === undefined ? {} : { id: op.id }),
-            ...(op.label === undefined ? {} : { label: op.label }),
+            edge: {
+              from: op.from,
+              to: op.to,
+              ...(op.id === undefined ? {} : { id: op.id }),
+              ...(op.label === undefined ? {} : { label: op.label }),
+            },
+            id: op.id ?? `\u0000added:${addedCount}`,
           },
         ];
         break;
       }
       case "deleteEdge": {
-        const ids = edgeIds(edges);
-        edges = edges.filter((_, i) => ids[i] !== op.edgeId);
+        tracked = tracked.filter((t) => t.id !== op.edgeId);
         break;
       }
     }
   }
 
-  return { ...(spec.name === undefined ? {} : { name: spec.name }), nodes, edges };
+  return {
+    ...(spec.name === undefined ? {} : { name: spec.name }),
+    nodes,
+    edges: tracked.map((t) => t.edge),
+  };
 }
 
 /** Spans the patcher is allowed to touch, for the "unknown links stay untouched" assertion. */

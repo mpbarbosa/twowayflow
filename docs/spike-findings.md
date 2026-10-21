@@ -112,8 +112,11 @@ against one snapshot of the source:
 2. `[renameNode("a","aa"), moveNode("a", …)]` — the patcher applies both, because both resolved
    against the original spans; the model looks the node up by id and the second op silently
    misses.
-3. `[deleteEdge("a->b"), deleteEdge("a->b#1")]` — see 3.2. This one is fixed: it was a symptom
-   of positional edge identity, not of batching, and declared ids removed it.
+3. `[deleteEdge("a->b"), deleteEdge("a->b#1")]` — see 3.2. **Fixed**, but not by declared edge
+   ids. Declaring ids avoids it only when ids are declared; the divergence remained for
+   *undeclared* parallel edges, which is still the default. What fixed it was making the model
+   resolve edge identity **once per batch**, the way the patcher already resolved spans. See
+   3.2.
 
 None of these is a bug in the patcher or the model. The batch is simply ambiguous. **The
 resolution adopted:** operations in one batch must be independent, `patch()` throws on the
@@ -156,6 +159,40 @@ What `.edge()` does now ([docs/dsl.md](dsl.md) §1):
   the identity becomes something written down rather than counted.
 - Declaring the same id twice is a `duplicate-edge-id` diagnostic, and the patcher refuses to act
   on an ambiguous id rather than guessing.
+
+**A correction to the above, found by reviewing it.** Removing the parallel-edge rule from
+`batchIsSafe` was premature: the rule excluded a case that declared ids only *partly* fix.
+
+An edge without a declared id is still positional, so deleting one such edge still renumbers its
+undeclared siblings — and `applyOpsToSpec` recomputed ids after every op while `patch()` resolved
+every op against one snapshot. The two therefore still disagreed, for exactly the batch the rule
+used to exclude:
+
+```ts
+  .edge("a", "b")          // ids: "a->b"
+  .edge("a", "b");         //      "a->b#1"
+
+  // batch: [deleteEdge("a->b"), deleteEdge("a->b#1")]
+  //   patched text -> 0 edges   (both links resolved against the original snapshot)
+  //   model        -> 1 edge    ("a->b#1" no longer existed after the first delete)
+```
+
+Eight lines reproduce it, yet a 12,000-run pass was green: the generator reaches parallel edges
+and reaches two-delete batches, but rarely both at once on an *undeclared* pair. So the suite had
+stopped excluding the case without starting to cover it, which is worse than the rule it replaced.
+
+**The fix.** `applyOpsToSpec` now resolves edge identity once, from the spec the ops were computed
+against, and carries it; `deleteEdge` matches that carried id instead of recomputing. The model
+and the patcher now share the snapshot semantics that `patch()` always had, so the batch is well
+defined for declared and undeclared edges alike, and nothing has to be forbidden.
+
+Two things guard it, and both were checked by deleting the fix and watching them fail:
+
+- deterministic cases in `packages/core/test/patch.test.ts` covering two parallel edges deleted
+  together, one of two, declared ids, and a `deleteNode` cascading over both;
+- a dedicated property that *constructs* the shape — n edges between one pair, each independently
+  declared or not, an arbitrary subset deleted in one batch — rather than waiting for the general
+  generator to stumble into it.
 
 What this bought in the test suite:
 
