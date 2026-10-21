@@ -46,6 +46,7 @@ export interface NodeLinkFields {
   readonly id: string;
   readonly kind?: NodeKind;
   readonly label?: string;
+  readonly description?: string;
   readonly position?: Position;
 }
 
@@ -60,6 +61,9 @@ export function printNodeLink(node: NodeLinkFields): string {
   if (node.kind !== undefined) parts.push(`kind: ${quote(node.kind)}`);
   if (node.position !== undefined) parts.push(`at: ${printPosition(node.position)}`);
   if (node.label !== undefined) parts.push(`label: ${quote(node.label)}`);
+  // Nothing the canvas does produces a description, so this only ever fires when a spec that
+  // came from a parse is printed back out. Dropping it there would lose a line the user wrote.
+  if (node.description !== undefined) parts.push(`description: ${quote(node.description)}`);
   const options = parts.length > 0 ? `, { ${parts.join(", ")} }` : "";
   return `.node(${quote(node.id)}${options})`;
 }

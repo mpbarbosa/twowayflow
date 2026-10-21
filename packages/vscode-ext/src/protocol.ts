@@ -5,6 +5,8 @@ export interface CanvasNode {
   readonly id: string;
   readonly kind?: string;
   readonly label?: string;
+  /** Shown when the pointer rests on the node. Never patched back. */
+  readonly description?: string;
   readonly position?: { x: number; y: number };
   /** Where this node lives in the file. The reason selection sync works at all. */
   readonly span: Span;

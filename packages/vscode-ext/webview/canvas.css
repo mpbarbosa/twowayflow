@@ -90,6 +90,60 @@ body,
   opacity: 0.5;
 }
 
+/*
+ * The hover description.
+ *
+ * Positioned against `.react-flow__node` — the wrapper React Flow already positions — rather
+ * than against `.twf-node` itself, because making the node body a containing block would move
+ * the absolutely-positioned connection handles with it.
+ */
+.twf-tip {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0;
+  z-index: 10;
+  box-sizing: border-box;
+  width: max-content;
+  max-width: 280px;
+  padding: 6px 9px;
+  font-size: 11px;
+  font-weight: 400;
+  line-height: 1.45;
+  text-align: left;
+  white-space: normal;
+  color: var(--vscode-editorHoverWidget-foreground, inherit);
+  background: var(--vscode-editorHoverWidget-background, #f3f3f3);
+  border: 1px solid var(--vscode-editorHoverWidget-border, rgba(128, 128, 128, 0.45));
+  border-radius: 4px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.28);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 90ms ease 260ms;
+}
+
+.react-flow__node:hover .twf-tip,
+.react-flow__node:focus .twf-tip,
+.react-flow__node:focus-visible .twf-tip {
+  opacity: 1;
+}
+
+/* A tooltip that followed the node under the cursor would just be in the way. */
+.react-flow__node.dragging .twf-tip {
+  opacity: 0;
+  transition: none;
+}
+
+/*
+ * Lift the hovered node above its neighbours so the tooltip is not painted under the one below
+ * it. React Flow sets z-index inline on every node wrapper, hence `!important`.
+ */
+.react-flow__node:hover,
+.react-flow__node:focus-within {
+  /* biome-ignore lint/complexity/noImportantStyles: the rule it has to beat is React Flow's own
+     inline z-index on the node wrapper, which no selector can outrank. */
+  z-index: 10 !important;
+}
+
 .twf-kind-source {
   border-left-color: #3b8f4a;
 }

@@ -162,7 +162,7 @@ export const harness = {
 
   lastGraph():
     | {
-        nodes: { id: string; position?: { x: number; y: number } }[];
+        nodes: { id: string; description?: string; position?: { x: number; y: number } }[];
         edges: { id: string; from: string; to: string }[];
       }
     | undefined {
