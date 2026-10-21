@@ -14,6 +14,7 @@ import assert from "node:assert/strict";
 import { existsSync } from "node:fs";
 import { applyPatch, extractComments, getParser, parseFlowSourceWith } from "@twowayflow/core";
 import * as vscode from "vscode";
+import { toCanvasGraph } from "../src/graph.js";
 
 type Case = [name: string, body: () => Promise<void>];
 
@@ -133,6 +134,31 @@ const cases: Case[] = [
       // The claim being tested: this is a normal text edit, so normal undo undoes it.
       await vscode.commands.executeCommand("undo");
       assert.equal(document.getText(), original, "undo should restore the file byte-for-byte");
+    },
+  ],
+
+  [
+    "the graph the canvas is sent carries each node's description",
+    async () => {
+      const document = await openExample("pessoa-rag.flow.ts");
+      await vscode.commands.executeCommand("twowayflow.openCanvas");
+
+      const parser = await getParser(wasmPaths());
+      // The same projection the panel pushes to the webview, so this is the data the hover
+      // renders — not a re-derivation of it.
+      const graph = toCanvasGraph(parseFlowSourceWith(parser, document.getText()), 1);
+
+      const undescribed = graph.nodes.filter((n) => n.description === undefined).map((n) => n.id);
+      assert.deepEqual(
+        undescribed,
+        [],
+        "every node in the example should reach the canvas described",
+      );
+      assert.match(
+        graph.nodes.find((n) => n.id === "fundirRrf")!.description!,
+        /reciprocal rank/,
+        "the description should be the file's own prose, not the label or the id",
+      );
     },
   ],
 
