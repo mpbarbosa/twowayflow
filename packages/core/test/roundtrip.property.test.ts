@@ -47,8 +47,7 @@ describe("print(parse(src)) === src", () => {
 
   it.each([...fixtureNames()])("holds for the %s fixture", (name) => {
     const source = fixture(name);
-    // DELIBERATE BREAK — proving CI can go red. Reverted in the next commit.
-    expect(reassembleFromLinks(parse(source))).toBe(`${source}twf-ci-canary`);
+    expect(reassembleFromLinks(parse(source))).toBe(source);
   });
 
   it.each([...exampleNames()])("holds for the %s example", (name) => {
