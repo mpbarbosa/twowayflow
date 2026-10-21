@@ -260,22 +260,6 @@ the next character is not whitespace, which covers the common case, but it does 
 reformat its surroundings. Deterministic formatting on write (the plan from the assessment) would
 tidy this, and is not needed for correctness.
 
-## 4. What was verified, and how
-
-Being precise about this, because "it works" means different things:
-
-| Claim | How it was verified |
-|---|---|
-| Parse and patch are correct | Property suite + hostile fixtures, 12,000 generated cases per property at `TWF_FC_RUNS=12000` |
-| `pnpm install && pnpm test` passes from a clean clone | Tracked files exported to an empty directory; install, test, typecheck, build and lint all run there |
-| Canvas gesture → ranged `WorkspaceEdit` → document change → re-parse → new graph | `packages/vscode-ext/test/roundtrip-loop.test.ts`, driving the real extension-host code against an in-memory VS Code API stub that applies edits back-to-front and fires change events like the real one |
-| Selection sync in both directions | Same test: cursor offset → node id, and node selection → `revealRange` |
-| The extension activates, the WASM loads in the real host, the panel opens, a patch is an ordinary undoable text edit | `packages/vscode-ext/integration/suite.ts` — 5/5 cases green in a real downloaded VS Code under `xvfb-run`. It asserts the extension is active, that both WASM files are genuinely in `dist/` rather than silently falling back to node_modules, that the panel opens for two different `.flow.ts` files, and that after a `moveNode` patch the closure and every comment are intact, the document is dirty, and plain `undo` restores the file byte-for-byte. |
-| Dragging with a mouse in a visible VS Code window | **Not verified by me.** The webview's drag handling was not exercised by a human or by UI automation. What is verified is everything on both sides of it: `onNodeDragStop` sends `moveNode`, and `moveNode` does the right thing all the way to the file. The gap is the React Flow drag gesture itself. |
-
-That last row is the honest limit of this spike. If a reviewer wants the gesture itself
-confirmed, press <kbd>F5</kbd> and drag a node; everything it depends on is covered by tests.
-
 ### 3.6 Two small things the integration test caught
 
 Worth recording because both are the kind of thing that only shows up in a real host:
@@ -290,6 +274,28 @@ Worth recording because both are the kind of thing that only shows up in a real 
   addresses them by absolute path so a packaged `.vsix` does not need node_modules, and it falls
   back to node_modules resolution when `dist/` has not been built — which is what lets
   `pnpm install && pnpm test` work on a clean clone with no build step.
+
+## 4. What was verified, and how
+
+Being precise about this, because "it works" means different things:
+
+| Claim | How it was verified |
+|---|---|
+| Parse and patch are correct | Property suite + hostile fixtures, 12,000 generated cases per property at `TWF_FC_RUNS=12000` |
+| `pnpm install && pnpm test` passes from a clean clone | Tracked files exported to an empty directory; install, test, typecheck, build and lint all run there |
+| Canvas gesture → ranged `WorkspaceEdit` → document change → re-parse → new graph | `packages/vscode-ext/test/roundtrip-loop.test.ts`, driving the real extension-host code against an in-memory VS Code API stub that applies edits back-to-front and fires change events like the real one |
+| Selection sync in both directions | Same test: cursor offset → node id, and node selection → `revealRange` |
+| The extension activates, the WASM loads in the real host, the panel opens, a patch is an ordinary undoable text edit | `packages/vscode-ext/integration/suite.ts` — 5/5 cases green in a real downloaded VS Code under `xvfb-run`. It asserts the extension is active, that both WASM files are genuinely in `dist/` rather than silently falling back to node_modules, that the panel opens for two different `.flow.ts` files, and that after a `moveNode` patch the closure and every comment are intact, the document is dirty, and plain `undo` restores the file byte-for-byte. |
+| Dragging with a mouse in a visible VS Code window | **Verified 2026-10-21, by hand.** Extension dev host launched against `examples/`, the canvas opened on `orders-etl.flow.ts`, and `parseRows` dragged with a mouse. The file changed by exactly one line — `at: [260, 120]` → `at: [274, 214]` — leaving the comment below it, the `run:` closure beside it, and the multi-line option-object formatting untouched. |
+
+That last row was open for most of the spike, and it was the one that mattered: everything else
+could be true while the gesture itself did nothing useful. It is closed now. The loop runs end to
+end — a human drags a node in a real editor, and the file receives a single ranged edit to one
+array literal.
+
+Reproduce it with <kbd>F5</kbd> ("Run twowayflow extension"), then open an example and drag. The
+check worth making is not that the node moves; it is that `git diff` afterwards shows one changed
+line and nothing else.
 
 ## 5. Verdict
 
