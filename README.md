@@ -53,7 +53,7 @@ TWF_FC_RUNS=12000 pnpm test
 Other scripts:
 
 ```bash
-pnpm run typecheck && pnpm run lint && pnpm run build
+pnpm run typecheck && pnpm run lint:biome && pnpm run build
 ```
 
 ### Trying the extension

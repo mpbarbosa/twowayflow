@@ -16,7 +16,7 @@
     "typecheck": "tsc --build --force",
     "build": "pnpm --filter twowayflow-vscode run build",
     "format": "biome format --write .",
-    "lint": "biome check .",
+    "lint:biome": "biome check .",
     "check": "biome check . && pnpm run typecheck && pnpm run test"
   },
   "devDependencies": {
