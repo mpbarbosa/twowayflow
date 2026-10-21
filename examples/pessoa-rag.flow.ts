@@ -24,7 +24,7 @@ import { flow } from "@twowayflow/dsl";
 export default flow("pessoa-rag")
   .node("pergunta", {
     kind: "source",
-    at: [0, 220],
+    at: [0, 400],
     label: "pergunta do utilizador",
     params: { de: ["src/cli.py", "src/web/fluxo.py"], idioma: ["pt", "en"] },
   })
@@ -33,13 +33,13 @@ export default flow("pessoa-rag")
   // a stale index does not raise, it answers wrongly.
   .node("indiceDenso", {
     kind: "source",
-    at: [0, 0],
+    at: [660, 0],
     label: "índice denso (numpy)",
     params: { caminho: "data/index", chunks: 2290, dim: 768, mb: 7.0, buscaMs: 5.57 },
   })
   .node("indiceLexical", {
     kind: "source",
-    at: [0, 460],
+    at: [310, 620],
     label: "BM25",
     params: { lib: "rank_bm25", stopwords: "revistas à mão", ndcg5: 0.488 },
   })
@@ -47,7 +47,7 @@ export default flow("pessoa-rag")
   // 68% for free, so the LLM router is not established as better — see docs/fase-4.
   .node("rotear", {
     kind: "transform",
-    at: [250, 220],
+    at: [310, 400],
     label: "roteador de voz",
     params: { modelo: "qwen2.5:7b", acerto: 0.72, custoS: 1.2, omissao: "desligado" },
   })
@@ -55,22 +55,22 @@ export default flow("pessoa-rag")
   // assertion but two separate methods, so there is no code path that forgets.
   .node("encodeQuery", {
     kind: "transform",
-    at: [500, 100],
+    at: [660, 160],
     label: "encode_queries",
     params: { modelo: "multilingual-e5-base", prefixo: "query: " },
   })
   .node("buscaDensa", {
     kind: "transform",
-    at: [760, 100],
+    at: [1010, 80],
     label: "top-20 denso",
     params: { ndcg5: 0.719, apt3: 0.95, profundidade: 20 },
   })
-  .node("buscaBm25", { kind: "transform", at: [500, 440], label: "top-20 lexical" })
+  .node("buscaBm25", { kind: "transform", at: [660, 620], label: "top-20 lexical" })
   // The two retrievers overlap by a median of 1/5, and not at all in 9 of 40 questions.
   // That disagreement is the whole reason fusion is worth doing.
   .node("fundirRrf", {
     kind: "join",
-    at: [1020, 260],
+    at: [1360, 360],
     label: "fusão RRF",
     params: { k: 60, fonte: "Cormack et al., SIGIR 2009", dedupPor: "poem_id" },
     run: (rankings: readonly string[][], k = 60) => {
@@ -87,26 +87,26 @@ export default flow("pessoa-rag")
   // or the measured delta stops meaning anything.
   .node("rerank", {
     kind: "filter",
-    at: [1270, 260],
+    at: [1700, 360],
     label: "rerank (opcional)",
     params: { nRerank: 8, topK: 6, deltaNdcg5: 0.09, custoS: 2.6 },
   })
   .node("montar", {
     kind: "transform",
-    at: [1520, 260],
+    at: [0, 940],
     label: "montar prompt",
     params: { personaEm: "system", orcamentoTokens: 500, cortaContextoNoLimite: true },
   })
   .node("gerar", {
     kind: "transform",
-    at: [1770, 260],
+    at: [340, 940],
     label: "gerar (Ollama)",
     params: { modelo: "llama3.1:8b-instruct-q4_K_M", fluxo: true, prefillDaEspera: [0.58, 0.89] },
   })
   // Each guard here answers a failure mode seen in the blind evaluation, not an imagined one.
   .node("verificarPersona", {
     kind: "filter",
-    at: [2020, 260],
+    at: [680, 940],
     label: "guarda de persona e língua",
     params: { observado: ["«Reis, na minha voz»", "«este poema não é do Reis»"] },
   })
@@ -115,7 +115,7 @@ export default flow("pessoa-rag")
   // calibrated on 30 real answers. Median verses copied went 82% -> 0%.
   .node("detectarPlagio", {
     kind: "filter",
-    at: [2270, 260],
+    at: [1020, 940],
     label: "guarda de cópia",
     params: { metrica: "difflib por verso", limiarVerso: 0.72, naoUsa: "8-gramas" },
   })
@@ -123,7 +123,7 @@ export default flow("pessoa-rag")
   // a conditional edge. Same condition either way, truncation included.
   .node("decidir", {
     kind: "fanout",
-    at: [2520, 260],
+    at: [1360, 940],
     label: "serve?",
     run: (plagiou: boolean, truncada: boolean, tentativa: number, max = 2) => {
       const serve = !plagiou && !truncada;
@@ -136,13 +136,13 @@ export default flow("pessoa-rag")
   // than less of it.
   .node("repetirSem", {
     kind: "transform",
-    at: [2270, 520],
+    at: [680, 1160],
     label: "repetir sem os copiados",
     params: { maxTentativas: 2, taxaMedida: 0.21, corrigiu: "3 de 3", custoMedioGeracoes: 1.21 },
   })
   .node("turno", {
     kind: "sink",
-    at: [2780, 180],
+    at: [1700, 940],
     label: "Turno",
     params: { mostra: ["texto", "fontes", "recuperacao_ms", "rerank_ms", "tentativas"] },
   })

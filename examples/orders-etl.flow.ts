@@ -15,7 +15,7 @@ export default flow("orders-etl")
   })
   .node("parseRows", {
     kind: "transform",
-    at: [260, 120],
+    at: [274, 214],
     // Inline code is the whole point of an embedded DSL: this is real, type-checked,
     // refactorable TypeScript, not a string in a config file.
     run: (rows: string[]) => rows.map((row) => row.split(",")),
