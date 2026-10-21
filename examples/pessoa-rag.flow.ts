@@ -26,6 +26,8 @@ export default flow("pessoa-rag")
     kind: "source",
     at: [0, 400],
     label: "pergunta do utilizador",
+    description:
+      "The user's turn as it arrives, from the CLI or the web front end, in Portuguese or English.",
     params: { de: ["src/cli.py", "src/web/fluxo.py"], idioma: ["pt", "en"] },
   })
   // The dense index refuses to load when its manifest does not match the corpus signature,
@@ -35,12 +37,16 @@ export default flow("pessoa-rag")
     kind: "source",
     at: [660, 0],
     label: "índice denso (numpy)",
+    description:
+      "The pre-built dense index read from disk; it declines to load unless its manifest matches the corpus signature, the encoder, the chunk count and the document order.",
     params: { caminho: "data/index", chunks: 2290, dim: 768, mb: 7.0, buscaMs: 5.57 },
   })
   .node("indiceLexical", {
     kind: "source",
     at: [310, 620],
     label: "BM25",
+    description:
+      "The BM25 postings over the same corpus, with a hand-revised Portuguese stopword list.",
     params: { lib: "rank_bm25", stopwords: "revistas à mão", ndcg5: 0.488 },
   })
   // `/auto` only. Measured 72% on 40 questions at +1.2 s; a corrected embedding centroid does
@@ -49,6 +55,8 @@ export default flow("pessoa-rag")
     kind: "transform",
     at: [310, 400],
     label: "roteador de voz",
+    description:
+      "Asks a small local model which heteronym the question is about, so retrieval and persona can be scoped to one voice.",
     params: { modelo: "qwen2.5:7b", acerto: 0.72, custoS: 1.2, omissao: "desligado" },
   })
   // e5 requires its prefixes, and without them it degrades silently. The defence is not an
@@ -57,21 +65,31 @@ export default flow("pessoa-rag")
     kind: "transform",
     at: [660, 160],
     label: "encode_queries",
+    description: "Embeds the question with e5, under the `query: ` prefix the model requires.",
     params: { modelo: "multilingual-e5-base", prefixo: "query: " },
   })
   .node("buscaDensa", {
     kind: "transform",
     at: [1010, 80],
     label: "top-20 denso",
+    description: "Nearest neighbours of the query vector in the dense index, cut at depth 20.",
     params: { ndcg5: 0.719, apt3: 0.95, profundidade: 20 },
   })
-  .node("buscaBm25", { kind: "transform", at: [660, 620], label: "top-20 lexical" })
+  .node("buscaBm25", {
+    kind: "transform",
+    at: [660, 620],
+    label: "top-20 lexical",
+    description:
+      "Term-overlap retrieval over the BM25 postings, cut at the same depth as the dense side so fusion sees two comparable lists.",
+  })
   // The two retrievers overlap by a median of 1/5, and not at all in 9 of 40 questions.
   // That disagreement is the whole reason fusion is worth doing.
   .node("fundirRrf", {
     kind: "join",
     at: [1360, 360],
     label: "fusão RRF",
+    description:
+      "Merges the two rankings by reciprocal rank, scoring a poem by where it sits in each list rather than by either engine's score scale.",
     params: { k: 60, fonte: "Cormack et al., SIGIR 2009", dedupPor: "poem_id" },
     run: (rankings: readonly string[][], k = 60) => {
       const pontos = new Map<string, number>();
@@ -89,18 +107,24 @@ export default flow("pessoa-rag")
     kind: "filter",
     at: [1700, 360],
     label: "rerank (opcional)",
+    description:
+      "Re-scores the fused head with a cross-encoder and keeps the top 6; opt-in, because the gain costs seconds.",
     params: { nRerank: 8, topK: 6, deltaNdcg5: 0.09, custoS: 2.6 },
   })
   .node("montar", {
     kind: "transform",
     at: [0, 940],
     label: "montar prompt",
+    description:
+      "Assembles the system and user messages: persona in the system slot, retrieved poems in the user slot, context cut when the token budget runs out.",
     params: { personaEm: "system", orcamentoTokens: 500, cortaContextoNoLimite: true },
   })
   .node("gerar", {
     kind: "transform",
     at: [340, 940],
     label: "gerar (Ollama)",
+    description:
+      "Streams the answer from the local Ollama model, first tokens arriving under a second.",
     params: { modelo: "llama3.1:8b-instruct-q4_K_M", fluxo: true, prefillDaEspera: [0.58, 0.89] },
   })
   // Each guard here answers a failure mode seen in the blind evaluation, not an imagined one.
@@ -108,6 +132,8 @@ export default flow("pessoa-rag")
     kind: "filter",
     at: [680, 940],
     label: "guarda de persona e língua",
+    description:
+      "Rejects an answer that speaks as the wrong heteronym, or in the wrong language, or that breaks frame to discuss the persona instead of inhabiting it.",
     params: { observado: ["«Reis, na minha voz»", "«este poema não é do Reis»"] },
   })
   // The plan specified 8-gram overlap. The first full run copied three of eight verses at 2%
@@ -117,6 +143,8 @@ export default flow("pessoa-rag")
     kind: "filter",
     at: [1020, 940],
     label: "guarda de cópia",
+    description:
+      "Compares each generated verse against the retrieved poems and rejects the answer when a verse is substantially the source's own.",
     params: { metrica: "difflib por verso", limiarVerso: 0.72, naoUsa: "8-gramas" },
   })
   // The acceptance rule. In `pipeline.py` this is an `if` inside a `for`; in `grafo.py` it is
@@ -125,6 +153,8 @@ export default flow("pessoa-rag")
     kind: "fanout",
     at: [1360, 940],
     label: "serve?",
+    description:
+      "The acceptance rule: serve the answer when nothing flagged it and it was not truncated, otherwise send it back for another attempt until the cap.",
     run: (plagiou: boolean, truncada: boolean, tentativa: number, max = 2) => {
       const serve = !plagiou && !truncada;
       return serve || tentativa >= max ? "fim" : "repetir";
@@ -138,12 +168,16 @@ export default flow("pessoa-rag")
     kind: "transform",
     at: [680, 1160],
     label: "repetir sem os copiados",
+    description:
+      "Rebuilds the prompt with the copied poems removed, which both takes away the occasion to copy and lets the next candidates into the budget.",
     params: { maxTentativas: 2, taxaMedida: 0.21, corrigiu: "3 de 3", custoMedioGeracoes: 1.21 },
   })
   .node("turno", {
     kind: "sink",
     at: [1700, 940],
     label: "Turno",
+    description:
+      "The finished turn handed back to the caller: the verse, its sources, and what the run cost.",
     params: { mostra: ["texto", "fontes", "recuperacao_ms", "rerank_ms", "tentativas"] },
   })
   .edge("pergunta", "rotear", { label: "texto" })
