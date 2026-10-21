@@ -1,0 +1,141 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+# A second push to the same branch makes the first run's answer worthless, so cancel it.
+# `main` is exempt: the run on a merge commit is the record that the merge was green.
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
+permissions:
+  contents: read
+
+jobs:
+  # ------------------------------------------------------------------------------------------
+  # The gate. Every command here was verified green from a clean export of the merge commit
+  # (docs/spike-findings.md §4), so a failure is a real regression and not a CI quirk.
+  # ------------------------------------------------------------------------------------------
+  check:
+    name: typecheck, lint, test, build
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: pnpm/action-setup@v6
+        # Version comes from the `packageManager` field in package.json (pnpm 10.34.7).
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 20
+          cache: pnpm
+
+      - name: Install
+        # pnpm 10 refuses postinstall scripts unless allow-listed. `onlyBuiltDependencies:
+        # [esbuild]` in pnpm-workspace.yaml is what lets esbuild fetch its platform binary;
+        # without it the build step fails with a missing-binary error, not an install error.
+        run: pnpm install --frozen-lockfile
+
+      - name: Typecheck
+        run: pnpm run typecheck
+
+      - name: Lint
+        run: pnpm run lint
+
+      - name: Test
+        # 80 tests, no display, no network, no build step first: the core package resolves the
+        # tree-sitter grammar and the WASM runtime out of node_modules. Only the packaged
+        # extension needs dist/.
+        run: pnpm test
+
+      - name: Build
+        run: pnpm run build
+
+  # ------------------------------------------------------------------------------------------
+  # The property suite is the spike's actual deliverable, so it runs on every pull request at
+  # the run count the findings were written against rather than the default 150.
+  # ------------------------------------------------------------------------------------------
+  property:
+    name: property suite (TWF_FC_RUNS=12000)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: pnpm/action-setup@v6
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 20
+          cache: pnpm
+
+      - name: Install
+        run: pnpm install --frozen-lockfile
+
+      - name: Test at 12000 runs per property
+        # ~264k generated cases. 76s on a developer machine; budget is generous because a
+        # hosted runner is slower. The per-test timeout in packages/core/vitest.config.ts is
+        # 180s, which is the limit that would actually bite first.
+        env:
+          TWF_FC_RUNS: 12000
+        run: pnpm test
+
+  # ------------------------------------------------------------------------------------------
+  # Real VS Code extension host. Downloads a ~1GB build on a cache miss and needs a display.
+  # Slower and more failure-prone than the rest, so it is deliberately NOT a required check —
+  # see the pull request description. It is reported, not enforced.
+  # ------------------------------------------------------------------------------------------
+  integration:
+    name: extension host integration
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: pnpm/action-setup@v6
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 20
+          cache: pnpm
+
+      - name: Install
+        run: pnpm install --frozen-lockfile
+
+      - name: Resolve the current VS Code stable version
+        id: vscode
+        # The cache key has to name the build it holds. @vscode/test-electron downloads
+        # whatever "stable" is on the day, into .vscode-test/vscode-linux-x64-<version>/; a key
+        # that did not move when stable moved would restore, miss, re-download every run and
+        # never save. Failing to resolve is not fatal: the job then runs on a fixed key and
+        # pays for one download.
+        run: |
+          set -uo pipefail
+          version="$(curl -fsSL --max-time 20 \
+            https://update.code.visualstudio.com/api/update/linux-x64/stable/latest \
+            | jq -r '.name // empty')"
+          case "$version" in
+            [0-9]*.[0-9]*)
+              echo "VS Code stable is $version" ;;
+            *)
+              echo "::warning::Could not resolve the VS Code stable version; using a fixed cache key. Expect a ~1GB download." >&2
+              version=unresolved ;;
+          esac
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+      - name: Cache the downloaded VS Code build
+        uses: actions/cache@v6
+        with:
+          path: packages/vscode-ext/.vscode-test
+          key: vscode-test-${{ runner.os }}-${{ steps.vscode.outputs.version }}
+          # A build from a previous stable is still worth restoring: test-electron keeps each
+          # version in its own directory, so the stale one costs disk, not correctness.
+          restore-keys: vscode-test-${{ runner.os }}-
+
+      - name: Integration test
+        # xvfb-run because the host opens a real window. `-a` picks a free display number.
+        run: xvfb-run -a pnpm run test:integration
