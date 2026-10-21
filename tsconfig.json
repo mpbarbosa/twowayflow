@@ -3,6 +3,7 @@
   "references": [
     { "path": "./packages/dsl" },
     { "path": "./packages/core" },
-    { "path": "./packages/vscode-ext" }
+    { "path": "./packages/vscode-ext" },
+    { "path": "./examples" }
   ]
 }
