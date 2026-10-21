@@ -1,0 +1,17 @@
+# Everything the extension does not need at runtime. The VSIX ships `dist/` and the manifest,
+# nothing else: web-tree-sitter is bundled into dist/extension.cjs, so there is no node_modules
+# to carry, and an installed extension has none to resolve anyway.
+.vscode/**
+.vscode-test/**
+.tsbuild/**
+dist-integration/**
+node_modules/**
+src/**
+webview/**
+test/**
+integration/**
+esbuild.mjs
+tsconfig.json
+vitest.config.ts
+**/*.map
+**/*.ts

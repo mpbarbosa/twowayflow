@@ -27,10 +27,15 @@ async function copyWasm() {
 /**
  * Two bundles.
  *
- * The extension host runs in Node and keeps `vscode` and `web-tree-sitter` external: `vscode`
- * because the host provides it, and web-tree-sitter because its emscripten glue resolves its
- * own files at runtime and bundling it breaks that. `import.meta.url` is defined to
- * `__filename` so the core package's `createRequire` fallback still works in the CJS output.
+ * Only `vscode` stays external, because the host provides it. **web-tree-sitter is bundled**,
+ * which is what makes a packaged `.vsix` self-contained: an extension installed from a VSIX has
+ * no node_modules to resolve, so anything left external is simply missing at runtime. Its
+ * emscripten glue would normally resolve its own `.wasm` beside itself, which bundling breaks —
+ * that is why `getParser` takes explicit absolute paths and the two WASM files are copied into
+ * `dist/`. Verified by running the bundled CJS directly, not just by it compiling.
+ *
+ * `import.meta.url` is defined to `__filename` so the core package's `createRequire` fallback
+ * still works in the CJS output.
  *
  * The webview is a browser bundle with React and @xyflow/react inlined.
  */
@@ -42,7 +47,7 @@ const extensionConfig = {
   target: "node20",
   format: "cjs",
   sourcemap: true,
-  external: ["vscode", "web-tree-sitter"],
+  external: ["vscode"],
   define: { "import.meta.url": "__filename" },
   logLevel: "info",
 };
@@ -69,7 +74,7 @@ const integrationConfig = {
   target: "node20",
   format: "cjs",
   sourcemap: true,
-  external: ["vscode", "web-tree-sitter"],
+  external: ["vscode"],
   define: { "import.meta.url": "__filename" },
   logLevel: "info",
 };
