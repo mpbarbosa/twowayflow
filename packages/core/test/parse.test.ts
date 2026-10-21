@@ -120,6 +120,60 @@ describe("opaque payload", () => {
   });
 });
 
+describe("declared edge ids", () => {
+  const SRC = [
+    'import { flow } from "@twowayflow/dsl";',
+    "",
+    'export default flow("f")',
+    '  .node("a", { kind: "source" })',
+    '  .node("b", { kind: "sink" })',
+    '  .edge("a", "b")',
+    '  .edge("a", "b", { id: "fast-path", label: "cached" });',
+    "",
+  ].join("\n");
+
+  it("uses the declared id as the edge's identity and records its span", () => {
+    const file = parse(SRC);
+
+    expect(file.edges.map((e) => e.id)).toEqual(["a->b", "fast-path"]);
+    expect(file.edges[1]!.declaredId).toBe("fast-path");
+    expect(sliceSpan(SRC, file.edges[1]!.idSpan!)).toBe("fast-path");
+    expect(file.diagnostics).toEqual([]);
+  });
+
+  it("reports the declared id in the spec, and only the declared one", () => {
+    expect(specOf(parse(SRC)).edges).toEqual([
+      { from: "a", to: "b" },
+      { from: "a", to: "b", id: "fast-path", label: "cached" },
+    ]);
+  });
+
+  it("does not renumber undeclared siblings — positional ids count only undeclared edges", () => {
+    const file = parse(fixture("parallel-edges.flow.ts"));
+
+    // The declared ids do not consume `#1` and `#2`: the undeclared edge keeps the bare pair.
+    expect(file.edges.map((e) => e.id)).toEqual(["fanIn->merge", "fast-path", "slow-path"]);
+    expect(file.diagnostics).toEqual([]);
+  });
+
+  it("refuses a link whose id is computed rather than written", () => {
+    const src = SRC.replace('{ id: "fast-path", label: "cached" }', "{ id: someVar }");
+    const file = parse(src);
+
+    // The other edge is unaffected: one opaque link never takes its siblings down with it.
+    expect(file.edges.map((e) => e.id)).toEqual(["a->b"]);
+    expect(file.unknownLinks.map((u) => u.reason)).toEqual(["non-literal-id"]);
+  });
+
+  it("reports two edges that resolve to the same id", () => {
+    const src = SRC.replace('.edge("a", "b")\n', '.edge("a", "b", { id: "fast-path" })\n');
+    const file = parse(src);
+
+    expect(file.diagnostics.map((d) => d.code)).toEqual(["duplicate-edge-id"]);
+    expect(file.edges.map((e) => e.id)).toEqual(["fast-path", "fast-path"]);
+  });
+});
+
 describe("the shipped examples", () => {
   it.each(exampleNames())("%s parses with no diagnostics", (name) => {
     const file = parse(example(name));

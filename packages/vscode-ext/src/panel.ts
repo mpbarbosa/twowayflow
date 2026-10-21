@@ -9,6 +9,7 @@ import {
   parseFlowSourceWith,
   patch,
   type Span,
+  suggestEdgeId,
 } from "@twowayflow/core";
 import * as vscode from "vscode";
 import type { Parser } from "web-tree-sitter";
@@ -158,9 +159,21 @@ export class FlowPanel {
           },
         ]);
         return;
-      case "addEdge":
-        await this.applyOps([{ op: "addEdge", from: message.from, to: message.to }]);
+      case "addEdge": {
+        // Declare an id when this would be the second or later edge between the same pair, so
+        // that deleting one parallel edge cannot change what its siblings mean. The first edge
+        // of a pair gets none: `from->to` already identifies it unambiguously.
+        const id = suggestEdgeId(this.file.edges, message.from, message.to);
+        await this.applyOps([
+          {
+            op: "addEdge",
+            from: message.from,
+            to: message.to,
+            ...(id === undefined ? {} : { id }),
+          },
+        ]);
         return;
+      }
       case "deleteEdge":
         await this.applyOps([{ op: "deleteEdge", edgeId: message.edgeId }]);
         return;

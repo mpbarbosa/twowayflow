@@ -1,6 +1,7 @@
 import { beforeAll, describe, expect, it } from "vitest";
 import {
   applyEdits,
+  applyOpsToSpec,
   applyPatch,
   checkSpanInvariants,
   extractComments,
@@ -12,6 +13,7 @@ import {
   patch,
   sliceSpan,
   specOf,
+  suggestEdgeId,
 } from "../src/index.js";
 import { fixture } from "./helpers.js";
 
@@ -294,6 +296,108 @@ describe("deleteEdge", () => {
     expect(parse(src).edges.map((e) => e.id)).toEqual(["a->b", "a->b#1"]);
     expect(run(src, [{ op: "deleteEdge", edgeId: "a->b#1" }])).not.toContain("second");
     expect(run(src, [{ op: "deleteEdge", edgeId: "a->b" }])).not.toContain("first");
+  });
+
+  it("still renumbers undeclared siblings, which is why the canvas declares ids", () => {
+    // The one case declared ids do not rescue: a hand-written pair where *neither* edge names
+    // itself. Deleting the first leaves the second answering to a different id than it did a
+    // moment ago. Nothing the canvas writes looks like this — `suggestEdgeId` declares an id for
+    // every parallel edge it creates — but a person can type it, so it is written down here
+    // rather than discovered later. See docs/spike-findings.md §3.2.
+    const src = [
+      'import { flow } from "@twowayflow/dsl";',
+      "",
+      'export default flow("f")',
+      '  .node("a", { kind: "source" })',
+      '  .node("b", { kind: "sink" })',
+      '  .edge("a", "b", { label: "first" })',
+      '  .edge("a", "b", { label: "second" });',
+      "",
+    ].join("\n");
+
+    const out = run(src, [{ op: "deleteEdge", edgeId: "a->b" }]);
+    const after = parse(out);
+
+    expect(after.edges.map((e) => e.label)).toEqual(["second"]);
+    expect(after.edges.map((e) => e.id)).toEqual(["a->b"]);
+  });
+});
+
+describe("declared edge ids", () => {
+  const PARALLEL = fixture("parallel-edges.flow.ts");
+
+  it("suggests nothing for the first edge of a pair and an id for every later one", () => {
+    const edges = specOf(parse(CANON)).edges;
+
+    expect(suggestEdgeId(edges, "a", "c")).toBeUndefined();
+    expect(suggestEdgeId(edges, "a", "b")).toBe("a->b#1");
+    expect(suggestEdgeId(specOf(parse(PARALLEL)).edges, "fanIn", "merge")).toBe("fanIn->merge#1");
+  });
+
+  it("writes the id into the new link when addEdge is given one", () => {
+    const out = run(CANON, [{ op: "addEdge", from: "a", to: "b", id: "a->b#1" }]);
+
+    expect(out).toContain('.edge("a", "b", { id: "a->b#1" })');
+    expect(parse(out).edges.map((e) => e.id)).toEqual(["a->b", "b->c", "a->b#1"]);
+  });
+
+  it("refuses an id that already identifies an edge", () => {
+    expect(() => run(CANON, [{ op: "addEdge", from: "a", to: "b", id: "a->b" }])).toThrow(
+      PatchError,
+    );
+  });
+
+  it("deletes one of several parallel edges and leaves its siblings' identity alone", () => {
+    const before = parse(PARALLEL);
+    expect(before.edges.map((e) => e.id)).toEqual(["fanIn->merge", "fast-path", "slow-path"]);
+
+    // Delete the *first* of the three. Under positional identity this was the dangerous case:
+    // the siblings would shuffle down into `fanIn->merge` and `fanIn->merge#1`, so an id read a
+    // moment earlier would now name a different edge.
+    const out = run(PARALLEL, [{ op: "deleteEdge", edgeId: "fanIn->merge" }]);
+    const after = parse(out);
+
+    expect(after.edges.map((e) => e.id)).toEqual(["fast-path", "slow-path"]);
+    expect(after.edges.map((e) => e.label)).toEqual(["cached", "recomputed"]);
+    // Byte-for-byte: the surviving links were not reprinted, only the deleted one removed.
+    for (const edge of before.edges.slice(1)) {
+      expect(out).toContain(sliceSpan(PARALLEL, edge.link.span));
+    }
+  });
+
+  it("deletes two parallel edges in one batch, which positional identity could not express", () => {
+    const file = parse(PARALLEL);
+    const ops: FlowOp[] = [
+      { op: "deleteEdge", edgeId: "fanIn->merge" },
+      { op: "deleteEdge", edgeId: "slow-path" },
+    ];
+
+    const out = applyPatch(file, ops).source;
+    expect(specOf(parse(out))).toEqual(applyOpsToSpec(specOf(file), ops));
+    expect(parse(out).edges.map((e) => e.id)).toEqual(["fast-path"]);
+  });
+
+  it("keeps a declared id across a rename of both its endpoints", () => {
+    let source = PARALLEL;
+    for (const op of [
+      { op: "renameNode", id: "fanIn", newId: "split" },
+      { op: "renameNode", id: "merge", newId: "collect" },
+    ] satisfies FlowOp[]) {
+      source = run(source, [op]);
+    }
+
+    // The positional edge followed its endpoints, as it must. The declared ones did not move.
+    expect(parse(source).edges.map((e) => e.id)).toEqual([
+      "split->collect",
+      "fast-path",
+      "slow-path",
+    ]);
+  });
+
+  it("refuses to delete an edge whose id is ambiguous", () => {
+    const src = PARALLEL.replace('{ id: "slow-path"', '{ id: "fast-path"');
+    expect(parse(src).diagnostics.map((d) => d.code)).toEqual(["duplicate-edge-id"]);
+    expect(() => run(src, [{ op: "deleteEdge", edgeId: "fast-path" }])).toThrow(PatchError);
   });
 });
 

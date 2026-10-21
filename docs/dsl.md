@@ -50,11 +50,50 @@ carried through untouched**.
 | `kind` | node | `"source" \| "transform" \| "filter" \| "fanout" \| "join" \| "sink"` | node shape/colour, handle layout |
 | `at` | node | `[x, y]` | canvas position |
 | `label` | node, edge | `string` | display text (falls back to the id) |
+| `id` | edge | `string` | this edge's identity, when it needs one of its own (below) |
 
 Any other property — `params`, `run`, `schema`, `retries`, an inline arrow function, whatever the
 runtime grows later — is **opaque to the canvas**. The parser records its byte range only so the
 patcher knows to stay out of it. Dragging a node must not reformat the `run:` closure sitting
 beside `at:`; that is one of the properties the test suite asserts (§5 of the findings doc).
+
+### Edge identity
+
+A node's identity is the string it declares. An edge's identity is usually *derived*: the edge
+`.edge("readCsv", "parse")` is known as `readCsv->parse`, and if the same pair is declared more
+than once the later ones pick up `#1`, `#2` and so on. For the overwhelmingly common case — one
+edge between a given pair — that is all anyone needs, and writing an id for it would be noise in
+every file.
+
+Parallel edges are the case where derived identity is not good enough, because it is defined by
+*position among siblings*: delete the first of three `fanIn->merge` edges and the other two
+shuffle down, so an id read a moment earlier now names a different edge. So an edge may declare
+its own:
+
+```ts
+export default flow("routing")
+  .node("fanIn", { kind: "fanout", at: [0, 0] })
+  .node("merge", { kind: "join", at: [240, 0] })
+  .edge("fanIn", "merge", { label: "default route" })
+  .edge("fanIn", "merge", { id: "fast-path", label: "cached" })
+  .edge("fanIn", "merge", { id: "slow-path", label: "recomputed" });
+```
+
+Two rules, and together they are what make this safe:
+
+- A declared `id` **is** that edge's identity, full stop. It survives its siblings being deleted,
+  and it survives both its endpoints being renamed.
+- The positional fallback counts only the **undeclared** edges of a pair. Adding an `id` to one
+  parallel edge therefore does not renumber the others — the edge above keeps `fanIn->merge`, not
+  `fanIn->merge#2`.
+
+The consequence is that an edge's identity depends on another edge still existing in exactly one
+situation: a pair with **two or more undeclared** edges. The canvas never writes that — when it
+creates an edge between a pair that already has one, it declares an id (`suggestEdgeId`) — so it
+only arises in a hand-written file, and the fix is to name the edges.
+
+Declaring an id twice in one file is an error: the parser reports `duplicate-edge-id` and the
+patcher refuses to act on the ambiguous id rather than guessing which edge was meant.
 
 ### Positions live in the file, on purpose
 
@@ -97,6 +136,17 @@ Insertion point is the end of the last `.edge(...)` link, else the last `.node(.
    .edge("readCsv", "parse")
 +  .edge("parse", "writeDb")
 ```
+
+If the new edge is the second or later one between the same pair, the canvas writes an `id` into
+it, because that is the point at which derived identity stops being stable:
+
+```diff
+   .edge("readCsv", "parse")
++  .edge("readCsv", "parse", { id: "readCsv->parse#1" })
+```
+
+The id it picks is the string the positional scheme would have produced anyway, so nothing the
+user sees changes shape; the identity simply becomes something written down rather than counted.
 
 Edges are *declared*, never *inferred from nesting*. That is the single most important choice in
 this document — see §3.
@@ -227,7 +277,9 @@ half-written files. A chain link is **unparsable** — recorded with its span, r
 box, and never patched — when:
 
 - the id is not a plain double-quoted string literal (a variable, a template literal, a
-  concatenation, or a string containing an escape sequence);
+  concatenation, or a string containing an escape sequence) — including an edge's `id` option,
+  which is identity and so is refused rather than ignored the way an unreadable `kind` or `label`
+  is;
 - the method is not `node` or `edge`;
 - the link uses optional chaining (`?.node(...)`);
 - the arguments do not type-shape as expected.

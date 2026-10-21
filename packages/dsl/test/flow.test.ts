@@ -37,6 +37,20 @@ describe("flow builder", () => {
     expect(right.nodes.map((n) => n.id)).toEqual(["a", "r"]);
   });
 
+  it("carries a declared edge id through to the spec", () => {
+    const spec = flow("demo")
+      .node("a", { kind: "source" })
+      .node("b", { kind: "sink" })
+      .edge("a", "b")
+      .edge("a", "b", { id: "fast-path", label: "cached" })
+      .toSpec();
+
+    expect(spec.edges).toEqual([
+      { from: "a", to: "b" },
+      { from: "a", to: "b", id: "fast-path", label: "cached" },
+    ]);
+  });
+
   it("omits position when `at` is absent", () => {
     const spec = flow("demo").node("a", { kind: "source" }).toSpec();
     expect(spec.nodes[0]).not.toHaveProperty("position");

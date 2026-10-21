@@ -16,7 +16,14 @@ import {
   sliceSpan,
   specOf,
 } from "../src/index.js";
-import { arbGraph, arbOpIntent, arbRenderStyle, renderFlow, resolveIntent } from "./arbitraries.js";
+import {
+  arbGraph,
+  arbOpIntent,
+  arbRenderStyle,
+  arbStableGraph,
+  renderFlow,
+  resolveIntent,
+} from "./arbitraries.js";
 import { example, exampleNames, fixture, fixtureNames } from "./helpers.js";
 
 let parse: (source: string) => FlowFile;
@@ -191,25 +198,34 @@ describe("parse(patch(src, op)) === applyOp(parse(src), op)", () => {
   });
 
   it("holds for a batch of operations applied together", () => {
+    // `arbStableGraph`, not `arbGraph`: a batch resolves every op against one snapshot, so it is
+    // only well defined when an id means the same thing before and after each op in it. That is
+    // a property of the *graph*, and it is the one the canvas maintains. See `batchIsSafe`.
     fc.assert(
-      fc.property(arbGraph, arbRenderStyle, arbOpIntent, arbOpIntent, (graph, style, a, b) => {
-        const { source } = renderFlow(graph, style);
-        const file = parse(source);
-        const spec = specOf(file);
-        const ids = file.edges.map((e) => e.id);
+      fc.property(
+        arbStableGraph,
+        arbRenderStyle,
+        arbOpIntent,
+        arbOpIntent,
+        (graph, style, a, b) => {
+          const { source } = renderFlow(graph, style);
+          const file = parse(source);
+          const spec = specOf(file);
+          const ids = file.edges.map((e) => e.id);
 
-        // Both ops resolve against the *original* graph, because that is the contract: a batch
-        // is computed against one set of source offsets and applied in one go.
-        const first = resolveIntent(a, spec, ids);
-        const second = resolveIntent(b, spec, ids);
-        if (!first || !second) return;
+          // Both ops resolve against the *original* graph, because that is the contract: a batch
+          // is computed against one set of source offsets and applied in one go.
+          const first = resolveIntent(a, spec, ids);
+          const second = resolveIntent(b, spec, ids);
+          if (!first || !second) return;
 
-        const ops: FlowOp[] = [first, second];
-        if (!batchIsSafe(spec, ops)) return;
+          const ops: FlowOp[] = [first, second];
+          if (!batchIsSafe(spec, ops)) return;
 
-        const patched = applyPatch(file, ops).source;
-        expect(specOf(parse(patched))).toEqual(applyOpsToSpec(spec, ops));
-      }),
+          const patched = applyPatch(file, ops).source;
+          expect(specOf(parse(patched))).toEqual(applyOpsToSpec(spec, ops));
+        },
+      ),
       config,
     );
   });
@@ -230,6 +246,18 @@ describe("parse(patch(src, op)) === applyOp(parse(src), op)", () => {
  *
  * This works out which source elements each op writes and rejects any batch that breaks
  * either rule.
+ *
+ * There used to be a third rule here: a batch could not contain two edge-deleting ops when the
+ * graph had parallel edges, because positional edge ids renumbered when a sibling went away. It
+ * is gone, because edge identity is declared now (docs/spike-findings.md §3.2) and the
+ * positional fallback counts only *undeclared* edges, so no edge's identity depends on another
+ * edge still existing.
+ *
+ * It is gone rather than narrowed because the precondition belongs to the graph, not to the pair
+ * of ops: a batch needs ids that mean the same thing before and after each op in it, and this
+ * property generates graphs that have that — `arbStableGraph`, at most one undeclared edge per
+ * pair, which is what the canvas maintains. A hand-written pair with two undeclared parallel
+ * edges still renumbers, and `arbGraph` still generates those for every other property.
  */
 function batchIsSafe(spec: FlowGraphSpec, ops: readonly FlowOp[]): boolean {
   const ids = edgeIds(spec.edges);
@@ -245,22 +273,13 @@ function batchIsSafe(spec: FlowGraphSpec, ops: readonly FlowOp[]): boolean {
   const gone = new Set(ops.flatMap((op) => (op.op === "deleteNode" ? [op.id] : [])));
   for (const op of ops) {
     if (op.op === "renameNode") continue;
-    if ("id" in op && renamed.has(op.id)) return false;
+    if ("id" in op && op.id !== undefined && renamed.has(op.id)) return false;
     if (op.op === "addEdge") {
       for (const end of [op.from, op.to]) {
         if (renamed.has(end) || gone.has(end)) return false;
       }
     }
   }
-
-  // Rule 3: edge ids are positional (`a->b`, `a->b#1`, ...), so removing one parallel edge
-  // renumbers its siblings. One edge-deleting op per batch is therefore well defined; two are
-  // not, when the graph has parallel edges. See docs/spike-findings.md — this is the weakest
-  // part of the identity model and the one thing the DSL should probably change.
-  const pairs = spec.edges.map((e) => `${e.from}->${e.to}`);
-  const hasParallelEdges = new Set(pairs).size !== pairs.length;
-  const edgeDeleters = ops.filter((op) => op.op === "deleteEdge" || op.op === "deleteNode").length;
-  if (hasParallelEdges && edgeDeleters > 1) return false;
 
   for (const op of ops) {
     const keys: string[] = [];
@@ -288,7 +307,10 @@ function batchIsSafe(spec: FlowGraphSpec, ops: readonly FlowOp[]): boolean {
         keys.push(`nodePos:${op.id}`);
         break;
       case "addEdge":
-        // A pure insertion; several in one batch are fine and come out in op order.
+        // A pure insertion; several in one batch are fine and come out in op order. An id it
+        // declares is an identity it writes, though, so it goes through rule 1 like any other:
+        // two ops may not claim the same edge id, and one may not claim an id another deletes.
+        if (op.id !== undefined) keys.push(`edge:${op.id}`);
         break;
       case "deleteEdge":
         keys.push(`edge:${op.edgeId}`);
@@ -303,6 +325,58 @@ function batchIsSafe(spec: FlowGraphSpec, ops: readonly FlowOp[]): boolean {
 
   return true;
 }
+
+// --------------------------------------------------------------------------------------------
+// Property 5b — edge identity survives its siblings being deleted
+// --------------------------------------------------------------------------------------------
+
+/**
+ * The guarantee declared edge ids exist to provide.
+ *
+ * Before them, an edge was keyed by its position among the edges sharing its endpoints, so
+ * deleting one parallel edge renumbered the rest: an id the canvas captured a moment earlier
+ * could silently come to mean a different edge. Now a declared id is an edge's identity outright
+ * and the positional fallback counts only *undeclared* edges, so no edge's id depends on another
+ * edge still being there — provided a pair has at most one undeclared edge, which is what the
+ * canvas guarantees (`suggestEdgeId`) and what the generator reproduces.
+ */
+describe("deleting an edge leaves every other edge's identity alone", () => {
+  it("holds when the edge is deleted directly", () => {
+    fc.assert(
+      fc.property(arbStableGraph, arbRenderStyle, fc.nat({ max: 20 }), (graph, style, which) => {
+        const { source } = renderFlow(graph, style);
+        const file = parse(source);
+        if (file.edges.length === 0) return;
+
+        const target = file.edges[which % file.edges.length]!.id;
+        const survivors = file.edges.filter((e) => e.id !== target).map((e) => e.id);
+
+        const patched = applyPatch(file, [{ op: "deleteEdge", edgeId: target }]).source;
+        expect(parse(patched).edges.map((e) => e.id)).toEqual(survivors);
+      }),
+      config,
+    );
+  });
+
+  it("holds when a node takes several edges down with it", () => {
+    fc.assert(
+      fc.property(arbStableGraph, arbRenderStyle, fc.nat({ max: 20 }), (graph, style, which) => {
+        const { source } = renderFlow(graph, style);
+        const file = parse(source);
+        if (file.nodes.length === 0) return;
+
+        const target = file.nodes[which % file.nodes.length]!.id;
+        const survivors = file.edges
+          .filter((e) => e.from !== target && e.to !== target)
+          .map((e) => e.id);
+
+        const patched = applyPatch(file, [{ op: "deleteNode", id: target }]).source;
+        expect(parse(patched).edges.map((e) => e.id)).toEqual(survivors);
+      }),
+      config,
+    );
+  });
+});
 
 // --------------------------------------------------------------------------------------------
 // Property 6 — the tool never eats a comment

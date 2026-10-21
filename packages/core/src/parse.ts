@@ -1,15 +1,17 @@
 import { NODE_KINDS, type NodeKind } from "@twowayflow/dsl";
 import type { Node, Parser } from "web-tree-sitter";
 import { getParser, type LanguageOptions } from "./language.js";
-import type {
-  ChainLink,
-  Diagnostic,
-  FlowEdge,
-  FlowFile,
-  FlowNode,
-  Span,
-  UnknownLink,
-  UnparsableReason,
+import {
+  type ChainLink,
+  type Diagnostic,
+  edgeIds,
+  type FlowEdge,
+  type FlowEdgeDraft,
+  type FlowFile,
+  type FlowNode,
+  type Span,
+  type UnknownLink,
+  type UnparsableReason,
 } from "./model.js";
 
 const KINDS = new Set<string>(NODE_KINDS);
@@ -70,9 +72,8 @@ function buildFlowFile(source: string, root: Node): FlowFile {
 
   const links = walkChain(source, rootCall);
   const nodes: FlowNode[] = [];
-  const edges: FlowEdge[] = [];
+  const edgeDrafts: FlowEdgeDraft[] = [];
   const unknownLinks: UnknownLink[] = [];
-  const edgeIdCounts = new Map<string, number>();
 
   for (const { link, call, optional } of links) {
     if (optional) {
@@ -89,13 +90,35 @@ function buildFlowFile(source: string, root: Node): FlowFile {
     }
 
     if (link.method === "edge") {
-      const parsed = parseEdgeLink(link, args, edgeIdCounts);
+      const parsed = parseEdgeLink(link, args);
       if ("reason" in parsed) pushUnknown(unknownLinks, diagnostics, link, parsed.reason, source);
-      else edges.push(parsed.edge);
+      else edgeDrafts.push(parsed.edge);
       continue;
     }
 
     pushUnknown(unknownLinks, diagnostics, link, "unknown-method", source);
+  }
+
+  // Identity is resolved across the whole file rather than link by link, because a declared id
+  // on one edge is only meaningful relative to the rest.
+  const resolvedIds = edgeIds(
+    edgeDrafts.map((e) => ({ from: e.from, to: e.to, id: e.declaredId })),
+  );
+  const edges: FlowEdge[] = edgeDrafts.map((draft, i) => ({ ...draft, id: resolvedIds[i]! }));
+
+  const takenEdgeIds = new Set<string>();
+  for (const edge of edges) {
+    if (takenEdgeIds.has(edge.id)) {
+      diagnostics.push({
+        code: "duplicate-edge-id",
+        severity: "error",
+        message:
+          `Edge id "${edge.id}" identifies more than one edge, so the canvas cannot tell them ` +
+          "apart. Give each of them a distinct `id`.",
+        span: edge.idSpan ?? edge.link.span,
+      });
+    }
+    takenEdgeIds.add(edge.id);
   }
 
   const seen = new Set<string>();
@@ -359,8 +382,7 @@ function parseNodeLink(
 function parseEdgeLink(
   link: ChainLink,
   args: readonly Node[],
-  counts: Map<string, number>,
-): { edge: FlowEdge } | { reason: UnparsableReason } {
+): { edge: FlowEdgeDraft } | { reason: UnparsableReason } {
   if (args.length < 2 || args.length > 3) return { reason: "bad-arity" };
 
   const from = plainStringSpan(args[0]!);
@@ -371,14 +393,20 @@ function parseEdgeLink(
   const options = objectArgument(args[2]);
   if (args.length === 3 && !options) return { reason: "bad-arity" };
 
+  // `id` is identity, so unlike `kind` and `label` — which are merely ignored when they are not
+  // plain literals — an `id` the patcher cannot read makes the whole link opaque. Guessing which
+  // edge a computed id refers to, or silently falling back to a positional id the file visibly
+  // contradicts, are both worse than refusing to draw the link.
+  const declared = options ? objectProperty(options, "id") : undefined;
+  const declaredId = declared ? plainStringSpan(declared) : undefined;
+  if (declared && !declaredId) return { reason: "non-literal-id" };
+  if (declaredId && declaredId.value === "") return { reason: "empty-id" };
+
   const label = stringProperty(options, "label");
-  const base = `${from.value}->${to.value}`;
-  const seen = counts.get(base) ?? 0;
-  counts.set(base, seen + 1);
 
   return {
     edge: {
-      id: seen === 0 ? base : `${base}#${seen}`,
+      ...(declaredId ? { declaredId: declaredId.value, idSpan: declaredId.span } : {}),
       from: from.value,
       fromSpan: from.span,
       to: to.value,

@@ -53,6 +53,7 @@ function build(name: string, nodes: NodeSpec[], edges: EdgeSpec[]): FlowBuilder<
       const edge: EdgeSpec = {
         from,
         to,
+        ...(options?.id === undefined ? {} : { id: options.id }),
         ...(options?.label === undefined ? {} : { label: options.label }),
       };
       return build(name, nodes, [...edges, edge]);

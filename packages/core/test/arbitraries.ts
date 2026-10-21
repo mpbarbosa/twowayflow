@@ -1,7 +1,7 @@
 import type { NodeKind, Position } from "@twowayflow/dsl";
 import { NODE_KINDS } from "@twowayflow/dsl";
 import fc from "fast-check";
-import type { FlowGraphSpec, FlowOp } from "../src/index.js";
+import { type FlowGraphSpec, type FlowOp, suggestEdgeId } from "../src/index.js";
 
 // --------------------------------------------------------------------------------------------
 // Graphs
@@ -14,6 +14,15 @@ const arbId = fc
     fc.stringMatching(/^[A-Za-z0-9_$]{0,7}$/),
   )
   .map(([head, tail]) => head + tail);
+
+/**
+ * A declared edge id. Drawn from an alphabet with no `->` in it, and including a few awkward
+ * ones, because a declared id is a free-form string literal rather than an identifier.
+ */
+const arbEdgeId = fc.oneof(
+  arbId.map((id) => `e_${id}`),
+  fc.constantFrom("fast-path", "slow path", "ligação directa", "100%"),
+);
 
 const arbKind: fc.Arbitrary<NodeKind> = fc.constantFrom(...NODE_KINDS);
 
@@ -28,39 +37,114 @@ const arbLabel = fc.oneof(
   fc.constantFrom("mesure de débit", "行数", "a'b", "100% / 2", "-- dash --"),
 );
 
-export const arbGraph: fc.Arbitrary<FlowGraphSpec> = fc
-  .record({
-    name: arbId,
-    nodes: fc.uniqueArray(
-      fc.record(
-        {
-          id: arbId,
-          kind: arbKind,
-          label: arbLabel,
-          position: arbPosition,
-        },
-        { requiredKeys: ["id"] },
-      ),
-      { minLength: 1, maxLength: 6, selector: (n) => n.id },
+const arbGraphShape = fc.record({
+  name: arbId,
+  nodes: fc.uniqueArray(
+    fc.record(
+      {
+        id: arbId,
+        kind: arbKind,
+        label: arbLabel,
+        position: arbPosition,
+      },
+      { requiredKeys: ["id"] },
     ),
-    edgeSeeds: fc.array(
-      fc.record({
-        from: fc.nat({ max: 20 }),
-        to: fc.nat({ max: 20 }),
-        label: fc.option(arbLabel, { nil: undefined }),
-      }),
-      { maxLength: 8 },
-    ),
-  })
-  .map(({ name, nodes, edgeSeeds }) => ({
+    { minLength: 1, maxLength: 6, selector: (n) => n.id },
+  ),
+  edgeSeeds: fc.array(
+    fc.record({
+      from: fc.nat({ max: 20 }),
+      to: fc.nat({ max: 20 }),
+      label: fc.option(arbLabel, { nil: undefined }),
+      // Half the seeds ask for an id. Most files in the wild will declare none, so the corpus
+      // has to keep plenty of fully-undeclared graphs to hold backward compatibility honest.
+      id: fc.option(arbEdgeId, { nil: undefined, freq: 2 }),
+    }),
+    { maxLength: 8 },
+  ),
+});
+
+function graphFrom(declareParallel: boolean) {
+  return arbGraphShape.map(({ name, nodes, edgeSeeds }) => ({
     name,
     nodes,
-    edges: edgeSeeds.map((seed) => ({
-      from: nodes[seed.from % nodes.length]!.id,
-      to: nodes[seed.to % nodes.length]!.id,
-      ...(seed.label === undefined ? {} : { label: seed.label }),
-    })),
+    edges: resolveEdgeSeeds(
+      edgeSeeds.map((seed) => ({
+        from: nodes[seed.from % nodes.length]!.id,
+        to: nodes[seed.to % nodes.length]!.id,
+        ...(seed.label === undefined ? {} : { label: seed.label }),
+        ...(seed.id === undefined ? {} : { id: seed.id }),
+      })),
+      declareParallel,
+    ),
   }));
+}
+
+/**
+ * Any legal flow file, including ones no canvas would have written.
+ *
+ * In particular it generates pairs with two or more *undeclared* parallel edges, whose identity
+ * is still positional and therefore still renumbers when one of them is deleted. That is a real
+ * shape a person can type, so the parser and every single-operation property have to cope with
+ * it.
+ */
+export const arbGraph: fc.Arbitrary<FlowGraphSpec> = graphFrom(false);
+
+/**
+ * A flow file in which every edge's identity is stable: at most one undeclared edge per pair.
+ *
+ * This is the invariant the canvas maintains — `suggestEdgeId` declares an id on every parallel
+ * edge it creates — and it is the precondition for the two properties that need identity to mean
+ * the same thing before and after an edit: identity stability under deletion, and batches
+ * containing more than one edge-deleting op. Positional identity cannot satisfy either, which is
+ * exactly why declared ids exist.
+ */
+export const arbStableGraph: fc.Arbitrary<FlowGraphSpec> = graphFrom(true);
+
+type SeededEdge = {
+  readonly from: string;
+  readonly to: string;
+  readonly id?: string;
+  readonly label?: string;
+};
+
+/**
+ * Settle which generated edges declare an id, and make sure no two edges share one.
+ *
+ * `declareParallel` decides the first question. When it is set, only the first edge of a pair may
+ * go undeclared — any later one is given an id, the way the canvas would. When it is not, every
+ * seed that did not ask for an id keeps a positional identity, however many siblings it has.
+ *
+ * Either way no two edges may resolve to the same id, or `deleteEdge` would be ambiguous and the
+ * parser would rightly complain. Positional ids are worked out first and declared ids are pushed
+ * aside until they stop colliding with them.
+ */
+function resolveEdgeSeeds(seeds: readonly SeededEdge[], declareParallel: boolean): SeededEdge[] {
+  const pairOf = (e: SeededEdge) => `${e.from}->${e.to}`;
+
+  // Pass 1: who is positional, and which ids does that reserve?
+  const positionalIds = new Set<string>();
+  const counts = new Map<string, number>();
+  const isPositional = seeds.map((seed) => {
+    const pair = pairOf(seed);
+    if (seed.id !== undefined) return false;
+    if (declareParallel && counts.has(pair)) return false;
+    const seen = counts.get(pair) ?? 0;
+    counts.set(pair, seen + 1);
+    positionalIds.add(seen === 0 ? pair : `${pair}#${seen}`);
+    return true;
+  });
+
+  // Pass 2: hand out declared ids, avoiding every id already spoken for.
+  const taken = new Set(positionalIds);
+  return seeds.map((seed, i) => {
+    if (isPositional[i]) return seed;
+    let id = seed.id ?? `${pairOf(seed)}#${i}`;
+    while (taken.has(id)) id = `${id}_`;
+    taken.add(id);
+    return { ...seed, id };
+  });
+}
 
 // --------------------------------------------------------------------------------------------
 // Rendering a graph as deliberately awkward source
@@ -117,7 +201,7 @@ export const arbRenderStyle: fc.Arbitrary<RenderStyle> = fc.record({
   ),
   gapChoices: fc.array(fc.nat({ max: GAPS.length - 1 }), { minLength: 24, maxLength: 24 }),
   nodeStyles: fc.array(fc.constantFrom(...OPTION_STYLES), { minLength: 8, maxLength: 8 }),
-  edgeStyles: fc.array(fc.nat({ max: 2 }), { minLength: 10, maxLength: 10 }),
+  edgeStyles: fc.array(fc.nat({ max: 3 }), { minLength: 10, maxLength: 10 }),
   unparsableAfter: fc.uniqueArray(fc.nat({ max: 7 }), { maxLength: 2 }),
   trailingNewlines: fc.nat({ max: 2 }),
 });
@@ -160,6 +244,8 @@ const UNPARSABLE_LINKS = [
   ".node(`templated${dynamicId}`, {})",
   '.stage("notAMethod", { at: [0, 0] })',
   '.node("pre" + dynamicId, { kind: "sink" })',
+  // A computed edge id is refused too: the patcher will not guess which edge it names.
+  '.edge("from", "to", { id: dynamicId })',
 ] as const;
 
 export interface Rendered {
@@ -192,16 +278,26 @@ export function renderFlow(spec: FlowGraphSpec, style: RenderStyle): Rendered {
 
   spec.edges.forEach((edge, i) => {
     const variant = style.edgeStyles[i % style.edgeStyles.length]!;
-    const options = edge.label === undefined ? "" : `, { label: ${literal(edge.label)} }`;
-    if (variant === 0) {
-      links.push(`.edge(${literal(edge.from)}, ${literal(edge.to)}${options})`);
-    } else if (variant === 1) {
-      links.push(`.edge( ${literal(edge.from)} , ${literal(edge.to)} ${options} )`);
-    } else {
+    const entries: [string, string][] = [];
+    if (edge.id !== undefined) entries.push(["id", literal(edge.id)]);
+    if (edge.label !== undefined) entries.push(["label", literal(edge.label)]);
+    // Variant 3 writes the same keys in the opposite order, so `label` can precede `id`.
+    const ordered = variant === 3 ? [...entries].reverse() : entries;
+    const object = (body: string) => (ordered.length === 0 ? "" : `, ${body}`);
+    const from = literal(edge.from);
+    const to = literal(edge.to);
+
+    if (variant === 1) {
+      const loose = `{  ${ordered.map(([k, v]) => `${k} :  ${v}`).join(" ,  ")} ,  }`;
+      links.push(`.edge( ${from} , ${to} ${object(loose)} )`);
+    } else if (variant === 2) {
       // Tight spacing, but only outside the string literals: squeezing spaces out of a label
       // would change the graph, not just its formatting.
-      const tight = edge.label === undefined ? "" : `,{label:${literal(edge.label)}}`;
-      links.push(`.edge(${literal(edge.from)},${literal(edge.to)}${tight})`);
+      const tight = `{${ordered.map(([k, v]) => `${k}:${v}`).join(",")}}`;
+      links.push(`.edge(${from},${to}${object(tight)})`);
+    } else {
+      const canonical = `{ ${ordered.map(([k, v]) => `${k}: ${v}`).join(", ")} }`;
+      links.push(`.edge(${from}, ${to}${object(canonical)})`);
     }
   });
 
@@ -247,7 +343,13 @@ export type OpIntent =
   | { readonly t: "deleteNode"; readonly which: number }
   | { readonly t: "renameNode"; readonly which: number; readonly newId: string }
   | { readonly t: "moveNode"; readonly which: number; readonly position: Position }
-  | { readonly t: "addEdge"; readonly fromWhich: number; readonly toWhich: number }
+  | {
+      readonly t: "addEdge";
+      readonly fromWhich: number;
+      readonly toWhich: number;
+      /** A caller-chosen id. When absent, the one the canvas would choose is used instead. */
+      readonly id?: string;
+    }
   | { readonly t: "deleteEdge"; readonly which: number };
 
 export const arbOpIntent: fc.Arbitrary<OpIntent> = fc.oneof(
@@ -269,6 +371,8 @@ export const arbOpIntent: fc.Arbitrary<OpIntent> = fc.oneof(
     t: fc.constant("addEdge" as const),
     fromWhich: fc.nat({ max: 20 }),
     toWhich: fc.nat({ max: 20 }),
+    // Usually left to the canvas's own rule, which is the path the extension actually takes.
+    id: fc.option(arbEdgeId, { nil: undefined, freq: 4 }),
   }),
   fc.record({ t: fc.constant("deleteEdge" as const), which: fc.nat({ max: 20 }) }),
 );
@@ -304,13 +408,16 @@ export function resolveIntent(
         id: nodeIds[intent.which % nodeIds.length]!,
         position: intent.position,
       };
-    case "addEdge":
+    case "addEdge": {
       if (nodeIds.length === 0) return undefined;
-      return {
-        op: "addEdge",
-        from: nodeIds[intent.fromWhich % nodeIds.length]!,
-        to: nodeIds[intent.toWhich % nodeIds.length]!,
-      };
+      const from = nodeIds[intent.fromWhich % nodeIds.length]!;
+      const to = nodeIds[intent.toWhich % nodeIds.length]!;
+      // Either the generator names the edge, or the canvas's own rule does: declare an id when
+      // this would be a parallel edge, and nothing when `from->to` already identifies it.
+      const id = intent.id ?? suggestEdgeId(spec.edges, from, to);
+      if (id !== undefined && edgeIdList.includes(id)) return undefined;
+      return { op: "addEdge", from, to, ...(id === undefined ? {} : { id }) };
+    }
     case "deleteEdge":
       if (edgeIdList.length === 0) return undefined;
       return { op: "deleteEdge", edgeId: edgeIdList[intent.which % edgeIdList.length]! };
