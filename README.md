@@ -32,7 +32,7 @@ deliverable; the VS Code extension is a working demonstration of the loop, not a
 | [`packages/dsl`](packages/dsl) | The `*.flow.ts` embedded DSL — a typed chained builder. The file format and the public API. |
 | [`packages/core`](packages/core) | tree-sitter parse into a graph where everything carries its source span, plus the patch API that turns canvas ops into ranged text edits. |
 | [`packages/vscode-ext`](packages/vscode-ext) | VS Code extension: a `@xyflow/react` canvas in a webview, synced continuously with the text editor. |
-| [`examples/`](examples) | Two worked `.flow.ts` files. |
+| [`examples/`](examples) | Four worked `.flow.ts` files — two synthetic, two projected from a real sibling project. |
 | [`docs/dsl.md`](docs/dsl.md) | The DSL surface syntax, and why it is patchable. |
 
 ## Getting started
