@@ -474,3 +474,75 @@ describe("conflicting batches", () => {
     ).toThrow(PatchError);
   });
 });
+
+describe("batched deletes of parallel edges", () => {
+  // Regression. An undeclared edge is identified positionally, so removing one sibling
+  // renumbers the rest. `patch()` resolves every op against one snapshot and deletes both
+  // links; `applyOpsToSpec` used to recompute ids after each op, so the second delete found no
+  // `a->b#1` and silently kept that edge. The two then disagreed about what one batch meant.
+  //
+  // The guard that used to exclude this case from the property suite was removed when declared
+  // edge ids landed, without the underlying case being fixed. These tests pin it so it cannot
+  // be dropped silently again.
+  const PARALLEL = [
+    'import { flow } from "@twowayflow/dsl";',
+    "",
+    'export default flow("parallel")',
+    '  .node("a", { kind: "source" })',
+    '  .node("b", { kind: "sink" })',
+    '  .edge("a", "b")',
+    '  .edge("a", "b");',
+    "",
+  ].join("\n");
+
+  it("identifies undeclared parallel edges positionally", () => {
+    expect(parse(PARALLEL).edges.map((e) => e.id)).toEqual(["a->b", "a->b#1"]);
+  });
+
+  it("deletes both when one batch names both, and agrees with the model", () => {
+    const file = parse(PARALLEL);
+    const ops: FlowOp[] = [
+      { op: "deleteEdge", edgeId: "a->b" },
+      { op: "deleteEdge", edgeId: "a->b#1" },
+    ];
+
+    const patched = applyPatch(file, ops).source;
+    expect(specOf(parse(patched)).edges).toEqual([]);
+    expect(specOf(parse(patched))).toEqual(applyOpsToSpec(specOf(file), ops));
+  });
+
+  it("deletes only the named one when a batch names one of two", () => {
+    const file = parse(PARALLEL);
+    const ops: FlowOp[] = [{ op: "deleteEdge", edgeId: "a->b#1" }];
+
+    const patched = applyPatch(file, ops).source;
+    expect(specOf(parse(patched)).edges).toEqual([{ from: "a", to: "b" }]);
+    expect(specOf(parse(patched))).toEqual(applyOpsToSpec(specOf(file), ops));
+  });
+
+  it("agrees for declared ids too, where identity never shifts", () => {
+    const src = PARALLEL.replace(
+      '  .edge("a", "b")\n  .edge("a", "b");',
+      '  .edge("a", "b", { id: "one" })\n  .edge("a", "b", { id: "two" });',
+    );
+    const file = parse(src);
+    expect(file.edges.map((e) => e.id)).toEqual(["one", "two"]);
+
+    const ops: FlowOp[] = [
+      { op: "deleteEdge", edgeId: "one" },
+      { op: "deleteEdge", edgeId: "two" },
+    ];
+    const patched = applyPatch(file, ops).source;
+    expect(specOf(parse(patched)).edges).toEqual([]);
+    expect(specOf(parse(patched))).toEqual(applyOpsToSpec(specOf(file), ops));
+  });
+
+  it("takes incident parallel edges with the node, by endpoint rather than by id", () => {
+    const file = parse(PARALLEL);
+    const ops: FlowOp[] = [{ op: "deleteNode", id: "a" }];
+
+    const patched = applyPatch(file, ops).source;
+    expect(specOf(parse(patched)).edges).toEqual([]);
+    expect(specOf(parse(patched))).toEqual(applyOpsToSpec(specOf(file), ops));
+  });
+});
