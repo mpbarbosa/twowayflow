@@ -1,0 +1,136 @@
+:root {
+  color-scheme: light dark;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+  font-family: var(--vscode-font-family, system-ui, sans-serif);
+  font-size: 13px;
+  color: var(--vscode-foreground, #333);
+  background: var(--vscode-editor-background, #fff);
+}
+
+.twf-root {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+
+.twf-bar {
+  display: flex;
+  gap: 16px;
+  align-items: baseline;
+  padding: 6px 12px;
+  border-bottom: 1px solid var(--vscode-panel-border, rgba(128, 128, 128, 0.35));
+  background: var(--vscode-sideBar-background, transparent);
+}
+
+.twf-counts {
+  opacity: 0.75;
+}
+
+.twf-hint {
+  margin-left: auto;
+  font-size: 11px;
+  opacity: 0.55;
+}
+
+.twf-error {
+  padding: 6px 12px;
+  background: var(--vscode-inputValidation-warningBackground, #fff4ce);
+  color: var(--vscode-inputValidation-warningForeground, #5c4813);
+  border-bottom: 1px solid var(--vscode-inputValidation-warningBorder, #d9b741);
+}
+
+.twf-canvas {
+  flex: 1;
+  min-height: 0;
+}
+
+.twf-node {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  min-width: 150px;
+  padding: 8px 12px;
+  border: 1px solid var(--vscode-panel-border, #8888);
+  border-left-width: 4px;
+  border-radius: 6px;
+  background: var(--vscode-editorWidget-background, #f6f6f6);
+  color: var(--vscode-editorWidget-foreground, inherit);
+}
+
+.twf-node.twf-selected {
+  outline: 2px solid var(--vscode-focusBorder, #0078d4);
+}
+
+/* The node whose source range contains the text cursor. This is code -> design selection. */
+.twf-node.twf-insync {
+  box-shadow: 0 0 0 2px var(--vscode-editor-findMatchHighlightBackground, #e8c45e);
+}
+
+.twf-glyph {
+  width: 1.2em;
+  text-align: center;
+  opacity: 0.8;
+}
+
+.twf-label {
+  font-weight: 600;
+}
+
+.twf-kindtag {
+  margin-left: auto;
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  opacity: 0.5;
+}
+
+.twf-kind-source {
+  border-left-color: #3b8f4a;
+}
+.twf-kind-transform {
+  border-left-color: #3a6ea8;
+}
+.twf-kind-filter {
+  border-left-color: #8a6d1f;
+}
+.twf-kind-fanout {
+  border-left-color: #6b4b9a;
+}
+.twf-kind-join {
+  border-left-color: #1f7c8a;
+}
+.twf-kind-sink {
+  border-left-color: #a34242;
+}
+
+.twf-unknown {
+  border-style: dashed;
+  border-left-color: #999;
+  opacity: 0.8;
+}
+
+.twf-unknown code {
+  font-family: var(--vscode-editor-font-family, monospace);
+  font-size: 11px;
+  font-weight: 400;
+}
+
+.twf-add {
+  padding: 2px 10px;
+  font: inherit;
+  color: var(--vscode-button-foreground, #fff);
+  background: var(--vscode-button-background, #0078d4);
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.twf-add:hover {
+  background: var(--vscode-button-hoverBackground, #026ec1);
+}

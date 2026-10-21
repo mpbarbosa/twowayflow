@@ -1,0 +1,22 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "rootDir": ".",
+    "outDir": ".tsbuild",
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "types": ["node", "vscode"],
+    "jsx": "react-jsx",
+    "module": "Preserve",
+    "moduleResolution": "bundler",
+    "verbatimModuleSyntax": false,
+    "noEmit": false
+  },
+  "include": [
+    "src/**/*.ts",
+    "webview/**/*.ts",
+    "webview/**/*.tsx",
+    "integration/**/*.ts",
+    "test/**/*.ts"
+  ],
+  "references": [{ "path": "../core" }, { "path": "../dsl" }]
+}
