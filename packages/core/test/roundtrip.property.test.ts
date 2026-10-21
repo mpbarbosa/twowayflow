@@ -39,7 +39,9 @@ describe("print(parse(src)) === src", () => {
     fc.assert(
       fc.property(arbGraph, arbRenderStyle, (graph, style) => {
         const { source } = renderFlow(graph, style);
-        expect(reassembleFromLinks(parse(source))).toBe(source);
+        // DELIBERATE BREAK in the GENERATED property (not a fixture), so the failure has to
+        // come back through fast-check's shrinker. Reverted / never merged.
+        expect(reassembleFromLinks(parse(source))).toBe(source.replace("flow(", "flOw("));
       }),
       config,
     );
