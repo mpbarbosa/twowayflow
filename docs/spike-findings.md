@@ -297,6 +297,26 @@ Reproduce it with <kbd>F5</kbd> ("Run twowayflow extension"), then open an examp
 check worth making is not that the node moves; it is that `git diff` afterwards shows one changed
 line and nothing else.
 
+### Correction — what `b5bef72` demonstrates, and what it does not
+
+The message of `b5bef72` ("Lay out the three examples on the canvas") says its 28 repositioned
+nodes were "repositioned by dragging them in the extension". That is true of **one** of them: the
+`orders-etl.flow.ts` drag recorded in the table above. The other 27 — every node in
+`pessoa-rag.flow.ts` and `pessoa-corpus-build.flow.ts` — were produced by editing the `at:` arrays
+directly with a script, and checked by rendering the webview bundle against the real parser's
+output *outside* the extension host, with node geometry measured from the DOM.
+
+The distinction matters because of what that diff is offered as evidence for. Masking the
+coordinates does leave all three files byte-identical to their previous versions, and that is a
+real result — it shows the **file format** tolerates a coordinate-only edit across 278 lines of
+Portuguese labels, inline `run:` closures, multi-line option objects and a cycle. What it does not
+show is the **patcher** performing that edit. The evidence for the patcher is the rest of this
+section, and the mouse-drag row covers exactly one node.
+
+Recorded here rather than by rewriting the commit: `b5bef72` reached `origin/main` through #13
+before the error was noticed, and a correction that is visible is worth more than a history that
+looks clean.
+
 ## 5. Verdict
 
 **Build on it.** The approach is sound, the two make-or-break risks from the tech-stack
