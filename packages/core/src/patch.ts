@@ -9,7 +9,7 @@ import {
   printPosition,
   quote,
 } from "./print.js";
-import { applyEdits, indentationAt, isInsideLineComment, whitespaceRunStart } from "./text.js";
+import { applyEdits, indentationAt, isInsideLineComment } from "./text.js";
 
 export type FlowOp =
   | {
@@ -363,7 +363,7 @@ interface ResolvedDeletion {
 function resolveDeletions(source: string, deletions: readonly PendingDeletion[]): TextEdit[] {
   const resolved: ResolvedDeletion[] = deletions
     .map((d) => ({
-      start: whitespaceRunStart(source, d.link.span.start, d.link.leadingTriviaStart),
+      start: d.link.leadingTriviaStart,
       end: d.link.span.end,
       link: d.link,
       reason: d.reason,
