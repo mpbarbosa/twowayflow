@@ -67,11 +67,16 @@ export function printNodeLink(node: NodeLinkFields): string {
 export interface EdgeLinkFields {
   readonly from: string;
   readonly to: string;
+  /** Written out only when the edge declares one; most edges do not need it. */
+  readonly id?: string;
   readonly label?: string;
 }
 
 export function printEdgeLink(edge: EdgeLinkFields): string {
-  const options = edge.label === undefined ? "" : `, { label: ${quote(edge.label)} }`;
+  const parts: string[] = [];
+  if (edge.id !== undefined) parts.push(`id: ${quote(edge.id)}`);
+  if (edge.label !== undefined) parts.push(`label: ${quote(edge.label)}`);
+  const options = parts.length > 0 ? `, { ${parts.join(", ")} }` : "";
   return `.edge(${quote(edge.from)}, ${quote(edge.to)}${options})`;
 }
 

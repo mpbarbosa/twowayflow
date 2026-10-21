@@ -1,6 +1,6 @@
 import type { NodeKind, Position } from "@twowayflow/dsl";
 import type { ChainLink, Diagnostic, FlowFile, FlowGraphSpec, Span, TextEdit } from "./model.js";
-import { sliceSpan } from "./model.js";
+import { edgeIds, sliceSpan } from "./model.js";
 import {
   DEFAULT_INDENT,
   isPlainLiteralBody,
@@ -26,6 +26,12 @@ export type FlowOp =
       readonly op: "addEdge";
       readonly from: string;
       readonly to: string;
+      /**
+       * Identity to declare for the new edge. The caller decides, because the decision depends
+       * on the graph and the patcher must stay a pure function of the op: see
+       * {@link suggestEdgeId}.
+       */
+      readonly id?: string;
       readonly label?: string;
     }
   | { readonly op: "deleteEdge"; readonly edgeId: string };
@@ -318,6 +324,16 @@ function addEdge(
       });
     }
   }
+  if (op.id !== undefined) {
+    if (!isPlainLiteralBody(op.id) || op.id === "") {
+      throw new PatchError(
+        `Edge id ${JSON.stringify(op.id)} cannot be written as a plain literal.`,
+      );
+    }
+    if (file.edges.some((e) => e.id === op.id)) {
+      throw new PatchError(`Edge "${op.id}" already exists.`);
+    }
+  }
   const { offset, prefix } = edgeAnchor(file);
   edits.push({
     range: { start: offset, end: offset },
@@ -327,9 +343,51 @@ function addEdge(
 }
 
 function deleteEdge(file: FlowFile, edgeId: string, deletions: PendingDeletion[]): void {
-  const edge = file.edges.find((e) => e.id === edgeId);
-  if (!edge) throw new PatchError(`No edge "${edgeId}" in this file.`);
-  deletions.push({ link: edge.link, reason: `delete edge "${edgeId}"` });
+  const matches = file.edges.filter((e) => e.id === edgeId);
+  if (matches.length === 0) throw new PatchError(`No edge "${edgeId}" in this file.`);
+  // Two edges can only share an id if the file declares the same id twice, which the parser
+  // already reports as `duplicate-edge-id`. Deleting an arbitrary one of them would be a guess.
+  if (matches.length > 1) {
+    throw new PatchError(
+      `Edge id "${edgeId}" identifies ${matches.length} edges in this file, so it is ambiguous. ` +
+        "Give each of them a distinct `id` first.",
+    );
+  }
+  deletions.push({ link: matches[0]!.link, reason: `delete edge "${edgeId}"` });
+}
+
+/**
+ * The id a new `from` -> `to` edge should declare, or `undefined` when it needs none.
+ *
+ * The first edge of a pair needs no declared id: its positional identity `from->to` is already
+ * stable, and writing an id for it would put noise in every file. Any *later* edge of the same
+ * pair gets one, because that is exactly the case where positional identity stops being stable.
+ * The suggested id is the string the positional scheme would have produced anyway, so nothing
+ * the user sees changes shape — the identity simply becomes something written down rather than
+ * counted.
+ *
+ * This is deliberately not done inside `patch()`. An id chosen from the graph is a function of
+ * the graph, and `patch()` computes a whole batch against one snapshot: if it picked the id
+ * itself, `[deleteEdge("a->b"), addEdge("a","b")]` would choose `a->b#1` from the snapshot while
+ * the sequential model, having already removed `a->b`, would choose no id at all. Keeping the id
+ * in the op makes the patcher a pure function of its ops and keeps batches well defined. The
+ * caller — the extension, which has just re-parsed — calls this and passes the answer in.
+ *
+ * `edges` may be either `FlowEdge`s (whose `id` is already resolved) or spec edges (whose `id`
+ * is the declared one, if any): resolving an already-resolved list is the identity.
+ */
+export function suggestEdgeId(
+  edges: readonly { readonly from: string; readonly to: string; readonly id?: string }[],
+  from: string,
+  to: string,
+): string | undefined {
+  const pair = `${from}->${to}`;
+  if (!edges.some((e) => `${e.from}->${e.to}` === pair)) return undefined;
+  const taken = new Set(edgeIds(edges));
+  for (let n = 1; ; n += 1) {
+    const candidate = `${pair}#${n}`;
+    if (!taken.has(candidate)) return candidate;
+  }
 }
 
 interface PendingDeletion {
@@ -422,17 +480,6 @@ function survivingRestOfLine(
 // The model-side reference implementation
 // --------------------------------------------------------------------------------------------
 
-/** Edge ids, computed exactly as the parser computes them, so the two sides can be compared. */
-export function edgeIds(edges: readonly { from: string; to: string }[]): string[] {
-  const counts = new Map<string, number>();
-  return edges.map((edge) => {
-    const base = `${edge.from}->${edge.to}`;
-    const seen = counts.get(base) ?? 0;
-    counts.set(base, seen + 1);
-    return seen === 0 ? base : `${base}#${seen}`;
-  });
-}
-
 type SpecNode = FlowGraphSpec["nodes"][number];
 type SpecEdge = FlowGraphSpec["edges"][number];
 
@@ -483,7 +530,12 @@ export function applyOpsToSpec(spec: FlowGraphSpec, ops: readonly FlowOp[]): Flo
       case "addEdge": {
         edges = [
           ...edges,
-          { from: op.from, to: op.to, ...(op.label === undefined ? {} : { label: op.label }) },
+          {
+            from: op.from,
+            to: op.to,
+            ...(op.id === undefined ? {} : { id: op.id }),
+            ...(op.label === undefined ? {} : { label: op.label }),
+          },
         ];
         break;
       }

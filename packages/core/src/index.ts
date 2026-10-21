@@ -3,6 +3,7 @@ export {
   type ChainLink,
   type Diagnostic,
   type DiagnosticCode,
+  edgeIds,
   type FlowEdge,
   type FlowFile,
   type FlowGraphSpec,
@@ -19,11 +20,11 @@ export { parseFlowSource, parseFlowSourceWith } from "./parse.js";
 export {
   applyOpsToSpec,
   applyPatch,
-  edgeIds,
   type FlowOp,
   PatchError,
   type PatchResult,
   patch,
+  suggestEdgeId,
   untouchedSpansFor,
 } from "./patch.js";
 export {

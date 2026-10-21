@@ -104,6 +104,41 @@ describe("design -> code", () => {
     expect(extractComments(text)).toEqual(extractComments(SOURCE));
   });
 
+  it("declares an id for a parallel edge, so deleting its sibling cannot rename it", async () => {
+    await openPanel();
+
+    // `read->work` already exists, so a second one between the same pair needs an identity.
+    await harness.fromWebview({ type: "addEdge", from: "read", to: "work" });
+    expect(harness.document.getText()).toContain('.edge("read", "work", { id: "read->work#1" })');
+
+    // ... and a third, which must not collide with the second.
+    await harness.fromWebview({ type: "addEdge", from: "read", to: "work" });
+    expect(harness.document.getText()).toContain('.edge("read", "work", { id: "read->work#2" })');
+
+    // The canvas now sees three distinct edges; deleting the positional one leaves the other
+    // two meaning exactly what they meant before.
+    expect(harness.lastGraph()!.edges.map((e) => e.id)).toEqual([
+      "read->work",
+      "work->write",
+      "read->work#1",
+      "read->work#2",
+    ]);
+    await harness.fromWebview({ type: "deleteEdge", edgeId: "read->work" });
+    expect(harness.lastGraph()!.edges.map((e) => e.id)).toEqual([
+      "work->write",
+      "read->work#1",
+      "read->work#2",
+    ]);
+  });
+
+  it("adds the first edge of a pair without an id, because it needs none", async () => {
+    await openPanel();
+    await harness.fromWebview({ type: "addEdge", from: "read", to: "write" });
+
+    expect(harness.document.getText()).toContain('.edge("read", "write")');
+    expect(harness.lastGraph()!.edges.map((e) => e.id)).toContain("read->write");
+  });
+
   it("reports a refused operation instead of corrupting the file", async () => {
     await openPanel();
     await harness.fromWebview({ type: "renameNode", nodeId: "read", newId: 'bad"name' });

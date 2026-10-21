@@ -24,7 +24,22 @@ export interface NodeOptions {
   readonly [key: string]: unknown;
 }
 
+/**
+ * Options on an `.edge(...)` link.
+ *
+ * `id` and `label` are the only keys the canvas reads; everything else is opaque payload, as on
+ * a node. See docs/dsl.md.
+ */
 export interface EdgeOptions {
+  /**
+   * Declared identity for this edge, exactly as `.node(id, ...)` declares a node's.
+   *
+   * Optional, and absent in most files. An edge without one is identified *positionally* —
+   * `from->to`, suffixed `#n` for the n-th undeclared edge of that pair — which is only as
+   * stable as its undeclared siblings. Declare an id on each of a set of parallel edges and
+   * deleting one of them leaves the others' identities alone.
+   */
+  readonly id?: string;
   readonly label?: string;
   readonly [key: string]: unknown;
 }
@@ -47,5 +62,7 @@ export interface NodeSpec {
 export interface EdgeSpec {
   readonly from: string;
   readonly to: string;
+  /** The declared `id`, when the source gives one. Absent means "identify me positionally". */
+  readonly id?: string;
   readonly label?: string;
 }

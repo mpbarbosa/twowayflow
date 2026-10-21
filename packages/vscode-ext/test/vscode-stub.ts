@@ -160,7 +160,12 @@ export const harness = {
     await flushTimers();
   },
 
-  lastGraph(): { nodes: { id: string; position?: { x: number; y: number } }[] } | undefined {
+  lastGraph():
+    | {
+        nodes: { id: string; position?: { x: number; y: number } }[];
+        edges: { id: string; from: string; to: string }[];
+      }
+    | undefined {
     const graphs = this.toWebview.filter(
       (m): m is { type: "graph"; graph: { nodes: { id: string }[] } } =>
         typeof m === "object" && m !== null && (m as { type?: string }).type === "graph",

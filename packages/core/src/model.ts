@@ -63,8 +63,19 @@ export interface FlowNode {
 }
 
 export interface FlowEdge {
-  /** `from->to`, suffixed `#n` when the same pair is declared more than once. */
+  /**
+   * This edge's identity: its declared `id` when the source gives one, otherwise the positional
+   * fallback `from->to`, suffixed `#n` for the n-th *undeclared* edge of that pair. See
+   * {@link edgeIds}.
+   */
   readonly id: string;
+  /** The `id` option as written, when this edge declares one. */
+  readonly declaredId?: string;
+  /**
+   * The span *between* the quotes of the declared id literal, present only when `declaredId`
+   * is. Renaming an edge replaces exactly this, mirroring {@link FlowNode.idSpan}.
+   */
+  readonly idSpan?: Span;
   readonly from: string;
   readonly fromSpan: Span;
   readonly to: string;
@@ -74,10 +85,44 @@ export interface FlowEdge {
   readonly link: ChainLink;
 }
 
+/** An edge as the parser reads it, before identity is resolved across the whole file. */
+export type FlowEdgeDraft = Omit<FlowEdge, "id">;
+
+/**
+ * Resolve the identity of every edge in a list, in source order.
+ *
+ * A declared `id` is that edge's identity verbatim. An edge without one falls back to the
+ * positional scheme: `from->to` for the first *undeclared* edge of that pair, then `#1`, `#2`
+ * and so on.
+ *
+ * Counting only undeclared edges is the load-bearing detail. It means declaring an id on one of
+ * a set of parallel edges does not renumber the others, and — since the canvas declares an id
+ * on every parallel edge it creates — a pair with at most one undeclared edge has an identity
+ * for each of its edges that survives any of the others being deleted. Positional identity
+ * remains fragile in the one case the tool never authors: a hand-written pair with two or more
+ * undeclared edges, where deleting the first still renumbers the rest.
+ *
+ * This is the single implementation of edge identity. The parser uses it, and so does the
+ * span-free model the patcher is checked against, which is what lets the two be compared at all.
+ */
+export function edgeIds(
+  edges: readonly { readonly from: string; readonly to: string; readonly id?: string }[],
+): string[] {
+  const counts = new Map<string, number>();
+  return edges.map((edge) => {
+    if (edge.id !== undefined) return edge.id;
+    const base = `${edge.from}->${edge.to}`;
+    const seen = counts.get(base) ?? 0;
+    counts.set(base, seen + 1);
+    return seen === 0 ? base : `${base}#${seen}`;
+  });
+}
+
 export type DiagnosticCode =
   | "no-flow-chain"
   | "unparsable-link"
   | "duplicate-node-id"
+  | "duplicate-edge-id"
   | "dangling-edge"
   | "syntax-error";
 
@@ -116,6 +161,8 @@ export interface FlowGraphSpec {
   readonly edges: readonly {
     readonly from: string;
     readonly to: string;
+    /** The declared id only. Positional ids are derived, so recording one would be a lie. */
+    readonly id?: string;
     readonly label?: string;
   }[];
 }
@@ -132,6 +179,7 @@ export function specOf(file: FlowFile): FlowGraphSpec {
     edges: file.edges.map((e) => ({
       from: e.from,
       to: e.to,
+      ...(e.declaredId === undefined ? {} : { id: e.declaredId }),
       ...(e.label === undefined ? {} : { label: e.label }),
     })),
   };

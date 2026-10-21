@@ -160,6 +160,28 @@ export function checkSpanInvariants(file: FlowFile): SpanViolation[] {
       "endpoint spans are not inside their own chain link",
       edge.link.span,
     );
+
+    if (edge.idSpan) {
+      check(
+        sliceSpan(src, edge.idSpan) === edge.declaredId,
+        `edge ${edge.id} idSpan`,
+        `span holds ${JSON.stringify(sliceSpan(src, edge.idSpan))}`,
+        edge.idSpan,
+      );
+      check(
+        !!edge.optionsSpan && spanContains(edge.optionsSpan, edge.idSpan),
+        `edge ${edge.id} idSpan`,
+        "idSpan is not inside the options object",
+        edge.idSpan,
+      );
+    }
+
+    check(
+      edge.declaredId === undefined || edge.idSpan !== undefined,
+      `edge ${edge.id}`,
+      "declares an id but has no idSpan, so it could never be renamed",
+      edge.link.span,
+    );
   }
 
   for (const link of allLinks(file)) {
