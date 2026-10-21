@@ -1,0 +1,13 @@
+{
+  "name": "@twowayflow/examples",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Worked *.flow.ts files, typechecked the way a consumer of the DSL would resolve it",
+  "scripts": {
+    "typecheck": "tsc --build"
+  },
+  "dependencies": {
+    "@twowayflow/dsl": "workspace:*"
+  }
+}

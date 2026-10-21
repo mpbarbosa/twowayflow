@@ -1,5 +1,9 @@
 packages:
   - "packages/*"
+  # The examples are a workspace package so they resolve `@twowayflow/dsl` the way a
+  # consumer would, rather than through a tsconfig `paths` fiction. That is what makes
+  # typechecking them able to catch a broken export map, not just a broken graph.
+  - "examples"
 
 # pnpm >=10 refuses to run install scripts unless they are allow-listed.
 # esbuild downloads its platform binary in a postinstall script.
