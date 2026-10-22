@@ -1,4 +1,5 @@
 import * as vscode from "vscode";
+import { newDiagramRequest } from "./diagramCommand.js";
 import { FlowPanel } from "./panel.js";
 
 export function activate(context: vscode.ExtensionContext): void {
@@ -17,6 +18,9 @@ export function activate(context: vscode.ExtensionContext): void {
       }
       await FlowPanel.open(editor.document, context.extensionUri);
     }),
+    vscode.commands.registerCommand("twowayflow.newDiagramRequest", () =>
+      newDiagramRequest(context),
+    ),
   );
 }
 

@@ -35,6 +35,7 @@ deliverable; the VS Code extension is a working demonstration of the loop, not a
 | [`examples/`](examples) | Four worked `.flow.ts` files — two synthetic, two projected from a real sibling project. |
 | [`docs/dsl.md`](docs/dsl.md) | The DSL surface syntax, and why it is patchable. |
 | [`scripts/twf-diagram`](scripts/twf-diagram) | The mechanical half of landing a diagram in a project you explored: the branch, the titleblock, the folder index row, the commit, the push and the PR. |
+| [`scripts/twf-install`](scripts/twf-install) | Package this extension into a `.vsix`, install it in VS Code, and check the editor actually lists it. |
 
 ## Getting started
 
@@ -66,6 +67,19 @@ editor title bar or the command palette.
 Drag a node and watch the `at: [x, y]` in the source change — and nothing else. Edit the file and
 watch the canvas follow. Put the cursor in a `.node(...)` line and the matching node highlights.
 There is no Sync button, by design.
+
+To install it into your own VS Code instead of running it from <kbd>F5</kbd>:
+
+```bash
+scripts/twf-install
+```
+
+That packages the extension and installs it with `--force` — the manifest's version never
+changes, so without that VS Code keeps the copy it already has and says nothing — and then asks
+the editor what it lists, because `--install-extension` exits `0` for an extension VS Code will
+not show. `--code CMD` picks another editor CLI, `--vsix PATH` installs a file you already have,
+and `--package-only` just writes the `.vsix` and prints its path. Reload the window afterwards:
+a replaced extension is not picked up while the editor is running.
 
 There is also a real extension-host integration test, which needs a display (or `xvfb-run`) and
 downloads a VS Code build on first use:
@@ -114,3 +128,27 @@ index table and conflict there on merge. Take both rows.
 Exit codes are a contract: `0` did what was asked, `1` a usage error or a lint failure, `2`
 something a person must look at — a dirty tree, the wrong branch, an index holding paths the
 command did not name, or a push that did not land.
+
+### Asking for one from VS Code
+
+That request is a sentence, so the extension can write it for you. Run **twowayflow: New Diagram
+Request** from the command palette: it asks which project the diagram describes, what it shows,
+the notation, the slug, the title and the titleblock description, then hands Claude Code the one
+request that names every `twf-diagram` argument.
+
+```
+Draw a sequence diagram (Mermaid) of POST /api/perguntar in /home/you/src/pessoabot, slug
+turno-sequencia, titled "One turn in time", type "Sequence diagram — Mermaid" — use
+/home/you/src/twowayflow/scripts/twf-diagram to branch and land it, and open the PR, with the
+title as the commit subject.
+```
+
+| Setting | What it does |
+|---|---|
+| `twowayflow.diagramRequest.handoff` | `terminal` (the default) runs `claude '<request>'` in a terminal opened in the project being diagrammed; `clipboard` copies the request and opens the Claude Code side bar, for a session you already have. The clipboard is also the fallback when `claude` is not on `PATH`, because a terminal would only answer "command not found". |
+| `twowayflow.diagramRequest.scriptPath` | Where this checkout's `twf-diagram` is. Empty means: look for `scripts/twf-diagram` in the open workspace folders. The request has to name it absolutely, because the terminal starts in the *other* project. |
+
+It stops at the words, deliberately. It does not run `twf-diagram start` itself: one owner for the
+whole ritual means a dirty tree or an exit code `2` is something you talk about, not a
+notification toast. The judgement is still yours — the notation list is a starting point, and
+**Other…** takes any Type row.

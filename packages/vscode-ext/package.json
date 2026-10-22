@@ -26,6 +26,11 @@
         "command": "twowayflow.openCanvas",
         "title": "twowayflow: Open Flow Canvas",
         "icon": "$(type-hierarchy)"
+      },
+      {
+        "command": "twowayflow.newDiagramRequest",
+        "title": "twowayflow: New Diagram Request",
+        "icon": "$(graph)"
       }
     ],
     "menus": {
@@ -50,6 +55,24 @@
           "type": "boolean",
           "default": true,
           "description": "Reveal the source range in the text editor when a canvas node is selected."
+        },
+        "twowayflow.diagramRequest.handoff": {
+          "type": "string",
+          "enum": [
+            "terminal",
+            "clipboard"
+          ],
+          "enumDescriptions": [
+            "Run `claude '<request>'` in a terminal opened in the project being diagrammed.",
+            "Copy the request and open the Claude Code side bar, so you paste it into the session you already have."
+          ],
+          "default": "terminal",
+          "description": "How `twowayflow: New Diagram Request` hands the request to Claude Code. Falls back to the clipboard when `claude` is not on PATH."
+        },
+        "twowayflow.diagramRequest.scriptPath": {
+          "type": "string",
+          "default": "",
+          "description": "Absolute path to twowayflow's `scripts/twf-diagram`. Empty means: look for it in the open workspace folders."
         }
       }
     }

@@ -1,0 +1,112 @@
+#!/bin/sh
+# twf-install — package the twowayflow extension and install it in VS Code.
+#
+#   twf-install [--code CMD] [--vsix PATH] [--package-only]
+#
+# With no arguments it builds a .vsix from this checkout and installs it, then
+# asks the editor what it actually has: `--install-extension` exits 0 for an
+# extension VS Code will not list, so the install is not evidence of itself.
+#
+# The manifest's version never changes, so the install is forced — without that
+# VS Code keeps the copy it already has and says nothing about it.
+#
+# It prints the extension id on success. Reload the window afterwards
+# (Developer: Reload Window); a replaced extension is not picked up while the
+# editor is running.
+#
+# --code CMD   the editor CLI to use, or $TWF_CODE; otherwise the first of
+#              code, code-insiders, codium, code-oss found on PATH
+# --vsix PATH  install this file instead of packaging one
+# --package-only  write the .vsix, print its path, install nothing
+#
+# Exit codes are a contract:
+#   0  installed, or packaged with --package-only
+#   1  usage error, or a tool that has to be there is missing
+#   2  something a person must look at — the package or the install failed, or
+#      the editor does not list the extension afterwards
+set -u
+
+EXT_ID=twowayflow.twowayflow-vscode
+PKG=packages/vscode-ext
+
+me=${0##*/}
+
+die()  { printf '%s: %s\n' "$me" "$1" >&2; exit "${2:-1}"; }
+note() { printf '%s\n' "$1" >&2; }
+
+usage() {
+  sed -n '3,26p' "$0" | sed 's/^# \{0,1\}//'
+  exit "${1:-1}"
+}
+
+code=${TWF_CODE:-}
+vsix=''
+package_only=0
+
+while [ $# -gt 0 ]; do
+  case $1 in
+    --code)         code=${2:-}; shift 2 ;;
+    --vsix)         vsix=${2:-}; shift 2 ;;
+    --package-only) package_only=1; shift ;;
+    -h|--help)      usage 0 ;;
+    *)              die "unknown option: $1" ;;
+  esac
+done
+
+# The script is addressed by its own path, so it works from any directory — and the checkout it
+# packages is the one it sits in, not whatever the shell happens to be visiting.
+root=$(unset CDPATH; cd -- "$(dirname -- "$0")/.." && pwd -P) ||
+  die "cannot resolve the checkout" 2
+[ -f "$root/$PKG/package.json" ] ||
+  die "not a twowayflow checkout: no $PKG/package.json under $root" 2
+
+# --- the editor -----------------------------------------------------------
+
+if [ "$package_only" = 0 ]; then
+  if [ -z "$code" ]; then
+    for c in code code-insiders codium code-oss; do
+      if command -v "$c" >/dev/null 2>&1; then code=$c; break; fi
+    done
+  fi
+  [ -n "$code" ] ||
+    die "no editor CLI on PATH (tried code, code-insiders, codium, code-oss) — pass --code CMD" 1
+  command -v "$code" >/dev/null 2>&1 || die "not on PATH: $code" 1
+fi
+
+# --- the .vsix ------------------------------------------------------------
+
+if [ -n "$vsix" ]; then
+  [ -f "$vsix" ] || die "no such file: $vsix" 1
+else
+  command -v pnpm >/dev/null 2>&1 || die "pnpm is not on PATH" 1
+  # vsce comes from node_modules and packages what the build left in dist/.
+  [ -d "$root/node_modules" ] || die "run 'pnpm install' first: the package step needs vsce" 1
+
+  ( cd "$root" && pnpm --filter twowayflow-vscode run package ) >&2 ||
+    die "packaging failed" 2
+
+  # The file is named from the manifest, so read it off disk rather than spelling it out here.
+  # Two of them means a rename or a version bump left one behind: that is a person's call.
+  set -- "$root/$PKG"/*.vsix
+  [ -f "$1" ] || die "the package step left no .vsix in $PKG" 2
+  [ "$#" -eq 1 ] || die "$# .vsix files in $PKG — name the one you want with --vsix" 2
+  vsix=$1
+fi
+
+note "vsix: $vsix"
+
+if [ "$package_only" = 1 ]; then
+  printf '%s\n' "$vsix"
+  exit 0
+fi
+
+# --- the install ----------------------------------------------------------
+
+"$code" --install-extension "$vsix" --force >&2 || die "$code refused the install" 2
+
+# What the editor lists is the only evidence that the install landed.
+"$code" --list-extensions 2>/dev/null | grep -qx "$EXT_ID" ||
+  die "the install reported success, but $code does not list $EXT_ID" 2
+
+printf '%s\n' "$EXT_ID"
+note "installed: reload the VS Code window (Developer: Reload Window) to pick it up"

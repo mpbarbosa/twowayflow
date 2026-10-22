@@ -112,6 +112,43 @@ const selectionChange = new Emitter<{
   selections: Selection[];
 }>();
 
+/**
+ * The scripted half: `window.showQuickPick`, `showInputBox` and `showOpenDialog` answer from
+ * these queues, in the order the wizard asks, and everything the wizard does to the outside
+ * world is recorded instead of done.
+ */
+export const ui = {
+  /** Quick pick answers, by the label the user would click. Consumed in order. */
+  quickPicks: [] as (string | undefined)[],
+  /** Input box answers. `undefined` is Esc. Consumed in order. */
+  inputs: [] as (string | undefined)[],
+  /** What `showOpenDialog` returns. */
+  folder: undefined as string | undefined,
+  /** Every title the wizard put on a prompt, in order, so tests can see what it asked. */
+  asked: [] as string[],
+  /** The labels each quick pick offered, in order. */
+  offered: [] as string[][],
+  terminals: [] as { name?: string; cwd?: string; shown: boolean; sent: string[] }[],
+  clipboard: "",
+  executed: [] as string[],
+  infos: [] as string[],
+
+  reset() {
+    this.quickPicks = [];
+    this.inputs = [];
+    this.folder = undefined;
+    this.asked = [];
+    this.offered = [];
+    this.terminals = [];
+    this.clipboard = "";
+    this.executed = [];
+    this.infos = [];
+  },
+};
+
+/** Settings, keyed "section.key" as `getConfiguration(section).get(key)` addresses them. */
+export const settings = new Map<string, unknown>();
+
 export const harness = {
   document: new StubDocument(""),
   /** Messages the extension posted to the webview. */
@@ -134,6 +171,8 @@ export const harness = {
     this.errors = [];
     this.revealedRanges = [];
     this.html = "";
+    ui.reset();
+    settings.clear();
     disposeHooks.splice(0, disposeHooks.length);
   },
 
@@ -231,16 +270,84 @@ export const window = {
     harness.errors.push(message);
     return Promise.resolve(undefined);
   },
-  showInformationMessage: () => Promise.resolve(undefined),
+  showInformationMessage: (message: string) => {
+    ui.infos.push(message);
+    return Promise.resolve(undefined);
+  },
   get activeTextEditor() {
     return undefined;
+  },
+
+  showQuickPick<T extends string | { label: string }>(
+    items: readonly T[],
+    options?: { title?: string },
+  ): Promise<T | undefined> {
+    ui.asked.push(options?.title ?? "");
+    ui.offered.push(items.map((item) => (typeof item === "string" ? item : item.label)));
+    if (ui.quickPicks.length === 0) throw new Error(`unscripted quick pick: ${options?.title}`);
+    const answer = ui.quickPicks.shift();
+    if (answer === undefined) return Promise.resolve(undefined);
+    const found = items.find((item) => (typeof item === "string" ? item : item.label) === answer);
+    if (!found) throw new Error(`no such quick pick item: ${answer}`);
+    return Promise.resolve(found);
+  },
+
+  showInputBox(options?: {
+    title?: string;
+    validateInput?: (value: string) => string | undefined;
+  }): Promise<string | undefined> {
+    ui.asked.push(options?.title ?? "");
+    if (ui.inputs.length === 0) throw new Error(`unscripted input box: ${options?.title}`);
+    const answer = ui.inputs.shift();
+    if (answer === undefined) return Promise.resolve(undefined);
+    // The real box will not let you past a rejected value, so neither does this one.
+    const complaint = options?.validateInput?.(answer);
+    if (complaint !== undefined) {
+      throw new Error(`${options?.title} rejected ${JSON.stringify(answer)}: ${complaint}`);
+    }
+    return Promise.resolve(answer);
+  },
+
+  showOpenDialog(): Promise<{ fsPath: string }[] | undefined> {
+    return Promise.resolve(ui.folder === undefined ? undefined : [{ fsPath: ui.folder }]);
+  },
+
+  createTerminal(options: { name?: string; cwd?: string }) {
+    const terminal = {
+      ...options,
+      shown: false,
+      sent: [] as string[],
+      show() {
+        terminal.shown = true;
+      },
+      sendText(text: string) {
+        terminal.sent.push(text);
+      },
+    };
+    ui.terminals.push(terminal);
+    return terminal;
+  },
+};
+
+export const env = {
+  clipboard: {
+    writeText: (text: string) => {
+      ui.clipboard = text;
+      return Promise.resolve();
+    },
   },
 };
 
 export const workspace = {
   onDidChangeTextDocument: documentChange.event,
 
-  getConfiguration: () => ({ get: <T>(_key: string, fallback: T) => fallback }),
+  workspaceFolders: undefined as { uri: { fsPath: string; path: string } }[] | undefined,
+
+  getConfiguration: (section?: string) => ({
+    get: <T>(key: string, fallback: T) =>
+      (settings.get(section === undefined ? key : `${section}.${key}`) as T | undefined) ??
+      fallback,
+  }),
 
   applyEdit: (edit: WorkspaceEdit) => {
     harness.appliedEdits.push([...edit.edits]);
@@ -266,6 +373,12 @@ export const workspace = {
 
 export const commands = {
   registered: new Map<string, (...args: unknown[]) => unknown>(),
+  /** Command ids the extension asked the host to run — including ones no stub registered. */
+  executeCommand(id: string, ...args: unknown[]) {
+    ui.executed.push(id);
+    const handler = commands.registered.get(id);
+    return Promise.resolve(handler ? handler(...args) : undefined);
+  },
   registerCommand(id: string, handler: (...args: unknown[]) => unknown) {
     commands.registered.set(id, handler);
     return { dispose: () => commands.registered.delete(id) };
@@ -283,4 +396,5 @@ export default {
   window,
   workspace,
   commands,
+  env,
 };
