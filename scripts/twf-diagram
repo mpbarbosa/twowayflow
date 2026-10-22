@@ -1,0 +1,413 @@
+#!/bin/sh
+# twf-diagram — the mechanical half of landing a diagram in an explored project.
+#
+# The judgement (which notation, what claim, whether it is worth drawing) is
+# yours. This does the ritual around it: the branch, the titleblock, the folder
+# index row, the commit, the push and the pull request.
+#
+#   twf-diagram start <repo> <slug> --title T --type T [--desc D]
+#   twf-diagram lint  <repo> [slug]
+#   twf-diagram land  <repo> <slug> -m SUBJECT [--body-file F] [--pr] [--attribution]
+#
+# Every diagram goes in <repo>/docs/twowayflow/ on a branch of its own named
+# docs/twowayflow-<slug>, carrying a titleblock with name, type, project and
+# description, so it stays readable when pulled out of the repository it
+# describes.
+#
+# Exit codes are a contract:
+#   0  did what was asked
+#   1  usage error, or the lint found a diagram missing a titleblock field
+#   2  something a person must look at — a dirty tree, the wrong branch, an
+#      index holding paths this command did not name, a push that did not land
+set -u
+
+WIDTH=95          # total box width, in characters
+LABEL=13          # label column, "Description" plus two spaces
+GIT=${TWF_GIT:-git}
+
+me=${0##*/}
+
+die()  { printf '%s: %s\n' "$me" "$1" >&2; exit "${2:-1}"; }
+note() { printf '%s\n' "$1" >&2; }
+
+usage() {
+  sed -n '3,20p' "$0" | sed 's/^# \{0,1\}//'
+  exit "${1:-1}"
+}
+
+# A slug becomes a branch name, a file name and a markdown link, so keep it to
+# what is safe in all three.
+check_slug() {
+  case $1 in
+    ''|.*|*[!a-zA-Z0-9._-]*) die "slug must be letters, digits, dot, dash or underscore: '$1'" 1 ;;
+  esac
+}
+
+# --- the repository -------------------------------------------------------
+
+top() {
+  $GIT -C "$1" rev-parse --show-toplevel 2>/dev/null ||
+    die "not a git repository: $1" 2
+}
+
+default_branch() {
+  # The server's HEAD is the authority; a missing or stale origin/HEAD is not.
+  b=$($GIT -C "$1" ls-remote --symref origin HEAD 2>/dev/null |
+      sed -n 's|^ref: refs/heads/\(.*\)[[:space:]]HEAD$|\1|p' | head -1)
+  [ -n "$b" ] && { printf '%s\n' "$b"; return 0; }
+  b=$($GIT -C "$1" symbolic-ref --quiet refs/remotes/origin/HEAD 2>/dev/null)
+  [ -n "$b" ] && { printf '%s\n' "${b##*/}"; return 0; }
+  printf 'main\n'
+}
+
+project_name() {
+  u=$($GIT -C "$1" remote get-url origin 2>/dev/null) || u=''
+  u=${u%.git}; u=${u##*/}
+  # A path-style remote can end in something generic; the directory is then truer.
+  case $u in ''|origin|repo|git) u=$(basename "$1") ;; esac
+  printf '%s\n' "$u"
+}
+
+# --- the titleblock -------------------------------------------------------
+
+# Characters, not bytes: wc -m is locale-aware and the box drawing is not ASCII.
+width_of() { printf '%s' "$1" | wc -m | tr -d ' '; }
+
+rule() {  # rule <left> <right>
+  n=$((WIDTH - 2)); line=''
+  while [ "$n" -gt 0 ]; do line="$line─"; n=$((n - 1)); done
+  printf '%s%s%s\n' "$1" "$line" "$2"
+}
+
+box_line() {  # box_line <label> <text>
+  pad=$((WIDTH - 3 - LABEL - $(width_of "$2")))   # 2 borders and the leading space
+  [ "$pad" -lt 0 ] && pad=0
+  sp=''
+  while [ "$pad" -gt 0 ]; do sp="$sp "; pad=$((pad - 1)); done
+  printf '│ %-*s%s%s│\n' "$LABEL" "$1" "$2" "$sp"
+}
+
+titleblock() {  # titleblock <name> <type> <project> <description>
+  rule '┌' '┐'
+  box_line 'Name' "$1"
+  box_line 'Type' "$2"
+  box_line 'Project' "$3"
+  first=1
+  printf '%s\n' "$4" | fold -s -w $((WIDTH - 3 - LABEL)) | sed 's/ *$//' |
+  while IFS= read -r chunk; do
+    if [ "$first" = 1 ]; then box_line 'Description' "$chunk"; first=0
+    else box_line '' "$chunk"; fi
+  done
+  rule '└' '┘'
+}
+
+FIELDS='Name Type Project Description'
+SKELETON='<!-- twf: write the diagram here'
+
+still_skeleton() {  # still_skeleton <path> -> prints why, or nothing
+  if grep -q 'TODO: what this shows' "$1"; then
+    printf 'the skeleton description'
+  elif grep -qF "$SKELETON" "$1"; then
+    printf 'the skeleton body marker'
+  fi
+}
+
+lint_file() {  # lint_file <path> -> prints the missing field names
+  miss=''
+  for k in $FIELDS; do
+    # The label alone is not the field: there has to be a value after it.
+    grep -qE "^│ ${k}[[:space:]]+[^[:space:]│]" "$1" || miss="$miss $k"
+  done
+  printf '%s' "$miss"
+}
+
+describe() {  # describe <path> -> the whole Description, continuation lines joined
+  awk '
+    /^│ Description/ { f = 1; s = $0; sub(/^│ Description +/, "", s); sub(/ *│$/, "", s); out = s; next }
+    f && /^└/        { exit }
+    f                { s = $0; sub(/^│ +/, "", s); sub(/ *│$/, "", s); if (s != "") out = out " " s }
+    END              { print out }
+  ' "$1"
+}
+
+# --- the folder index -----------------------------------------------------
+
+index_path() { printf '%s/docs/twowayflow/README.md\n' "$1"; }
+
+index_init() {
+  [ -f "$1" ] && return 0
+  cat > "$1" <<EOF
+# twowayflow — design projections of this project
+
+This folder is the default home for everything produced when \`$2\` is explored
+or analyzed with [twowayflow](https://github.com/mpbarbosa/twowayflow): diagrams,
+\`*.flow.ts\` projections, and analysis notes.
+
+Each file carries a titleblock naming the diagram, its type, the project and
+what it shows, so it stays readable when pulled out of this repository.
+
+## What is here
+
+| File | What it projects |
+|---|---|
+EOF
+}
+
+index_upsert() {  # index_upsert <index> <slug> <description>
+  # A pipe in the description would open a third cell in the table.
+  cell=$(printf '%s' "$3" | sed 's/|/\\|/g')
+  want="| [\`$2.md\`]($2.md) | $cell |"
+  if grep -qF "($2.md)" "$1"; then
+    have=$(grep -F "($2.md)" "$1" | head -1)
+    if [ "$have" = "$want" ]; then
+      note "index: the row for $2.md is already right"
+    else
+      # The row is prose someone may have improved by hand, so say so rather
+      # than overwrite it.
+      note "index: the row for $2.md differs from the titleblock, and was left as it is"
+      note "         index:      $have"
+      note "         titleblock: $want"
+    fi
+    return 0
+  fi
+  grep -qE '^\|---\|---\|' "$1" || die "no '| File | What it projects |' table in $1" 2
+  tmp=$(mktemp "$(dirname "$1")/.twf-index.XXXXXX") || die "could not write beside $1" 2
+  # awk -v processes escape sequences in the value, which eats the \| above.
+  if TWF_ROW="$want" awk '
+       { print }
+       !done && /^\|---\|---\|/ { print ENVIRON["TWF_ROW"]; done = 1 }
+     ' "$1" > "$tmp"; then
+    mv "$tmp" "$1" || { rm -f "$tmp"; die "could not rewrite $1" 2; }
+  else
+    rm -f "$tmp"; die "could not rewrite $1" 2
+  fi
+  note "index: added a row for $2.md"
+}
+
+# --- subcommands ----------------------------------------------------------
+
+cmd_start() {
+  repo=''; slug=''; title=''; type=''; desc=''
+  while [ $# -gt 0 ]; do
+    case $1 in
+      --title) title=${2:-}; shift 2 ;;
+      --type)  type=${2:-};  shift 2 ;;
+      --desc)  desc=${2:-};  shift 2 ;;
+      -*)      die "unknown option: $1" ;;
+      *)       if [ -z "$repo" ]; then repo=$1; elif [ -z "$slug" ]; then slug=$1;
+               else die "unexpected argument: $1"; fi; shift ;;
+    esac
+  done
+  [ -n "$repo" ] && [ -n "$slug" ] || usage
+  check_slug "$slug"
+  [ -n "$title" ] || title=$slug
+  [ -n "$type" ] || die "--type is required: the notation, e.g. 'Sequence diagram — Mermaid'"
+  [ -n "$desc" ] || desc='TODO: what this shows, and what it is read off.'
+
+  root=$(top "$repo") || exit 2
+  branch="docs/twowayflow-$slug"
+  file="$root/docs/twowayflow/$slug.md"
+
+  [ -e "$file" ] && die "already exists: $file" 2
+  [ -z "$($GIT -C "$root" status --porcelain -uall)" ] ||
+    die "the tree has uncommitted changes — commit them, or ask whoever owns them to" 2
+
+  was=$($GIT -C "$root" branch --show-current)
+  created=0
+  if $GIT -C "$root" rev-parse --verify --quiet "refs/heads/$branch" >/dev/null; then
+    # A previous start was interrupted after the switch and before the write.
+    $GIT -C "$root" switch --quiet "$branch" || die "could not switch to $branch" 2
+    note "branch: $branch already existed, reusing it"
+  else
+    base=$(default_branch "$root")
+    if $GIT -C "$root" fetch --quiet origin "$base" 2>/dev/null; then
+      from=$($GIT -C "$root" rev-parse FETCH_HEAD)   # what THIS run fetched
+      shown="origin/$base"
+    elif $GIT -C "$root" rev-parse --verify --quiet "refs/remotes/origin/$base" >/dev/null; then
+      from="origin/$base"; shown="$from (could not fetch; the tracking ref may be behind)"
+    elif $GIT -C "$root" rev-parse --verify --quiet "refs/heads/$base" >/dev/null; then
+      from="$base"; shown="the local $base"
+    else
+      die "cannot resolve the default branch '$base' — nothing to branch from" 2
+    fi
+    $GIT -C "$root" switch --quiet -c "$branch" "$from" || die "could not create $branch" 2
+    created=1
+  fi
+
+  unwind() {  # leave no half-made branch behind
+    if [ "$created" = 1 ]; then
+      $GIT -C "$root" switch --quiet "$was" 2>/dev/null &&
+        $GIT -C "$root" branch -q -D "$branch" 2>/dev/null
+    fi
+  }
+
+  mkdir -p "$root/docs/twowayflow" || { unwind; die "could not create $root/docs/twowayflow" 2; }
+  if ! { printf '# %s\n\n```\n' "$title"
+         titleblock "$slug" "$type" "$(project_name "$root")" "$desc"
+         printf '```\n\n'
+         printf '<!-- twf: write the diagram here. Keep a "What each claim rests on"\n'
+         printf '     section: every assertion against the test, file or command that\n'
+         printf '     holds it. Say what you deliberately did not draw. -->\n'
+       } > "$file"; then
+    rm -f "$file"; unwind; die "could not write $file" 2
+  fi
+  [ -s "$file" ] || { rm -f "$file"; unwind; die "wrote nothing to $file" 2; }
+
+  printf '%s\n' "$file"
+  [ "$created" = 1 ] && note "branch: $branch (from ${shown:-$branch})"
+  return 0
+}
+
+cmd_lint() {
+  [ $# -ge 1 ] || usage
+  root=$(top "$1") || exit 2
+  dir="$root/docs/twowayflow"
+  [ -d "$dir" ] || die "no $dir — nothing has been drawn here yet" 1
+
+  list=$(mktemp) || die "could not list the diagrams" 2
+  if [ $# -ge 2 ]; then
+    check_slug "$2"
+    printf '%s\n' "$dir/$2.md" > "$list"
+  else
+    # One path per line: a filename with a space is one file, not two.
+    find "$dir" -maxdepth 1 -type f -name '*.md' ! -name 'README.md' | sort > "$list"
+  fi
+  [ -s "$list" ] || { rm -f "$list"; die "no diagram files to lint" 1; }
+
+  bad=0
+  while IFS= read -r f; do
+    if [ ! -f "$f" ]; then
+      bad=$((bad + 1)); printf '%s does not exist\n' "${f##*/}"; continue
+    fi
+    miss=$(lint_file "$f")
+    if [ -n "$miss" ]; then
+      bad=$((bad + 1)); printf '%s missing:%s\n' "${f##*/}" "$miss"
+    else
+      why=$(still_skeleton "$f")
+      [ -n "$why" ] && { bad=$((bad + 1)); printf '%s still carries %s\n' "${f##*/}" "$why"; }
+    fi
+  done < "$list"
+  rm -f "$list"
+
+  [ "$bad" -eq 0 ] && { printf 'all titleblocks complete\n'; return 0; }
+  return 1
+}
+
+cmd_land() {
+  repo=''; slug=''; subject=''; bodyfile=''; want_pr=0; attribution=0
+  while [ $# -gt 0 ]; do
+    case $1 in
+      -m)            subject=${2:-}; shift 2 ;;
+      --body-file)   bodyfile=${2:-}; shift 2 ;;
+      --pr)          want_pr=1; shift ;;
+      --attribution) attribution=1; shift ;;
+      -*)            die "unknown option: $1" ;;
+      *)             if [ -z "$repo" ]; then repo=$1; elif [ -z "$slug" ]; then slug=$1;
+                     else die "unexpected argument: $1"; fi; shift ;;
+    esac
+  done
+  [ -n "$repo" ] && [ -n "$slug" ] || usage
+  check_slug "$slug"
+  [ -n "$subject" ] || die "-m is required: the commit subject, in this repository's own voice"
+  # A body that cannot be read must not become a commit with no body.
+  [ -z "$bodyfile" ] || [ -r "$bodyfile" ] || die "cannot read --body-file: $bodyfile" 2
+
+  root=$(top "$repo") || exit 2
+  branch="docs/twowayflow-$slug"
+  file="docs/twowayflow/$slug.md"
+  index=$(index_path "$root")
+
+  # The guard compares. Printing the branch and trusting && is not a guard:
+  # git branch --show-current exits 0 whatever it prints.
+  [ "$($GIT -C "$root" branch --show-current)" = "$branch" ] ||
+    die "on $($GIT -C "$root" branch --show-current), expected $branch" 2
+  [ -f "$root/$file" ] || die "no $file" 2
+
+  miss=$(lint_file "$root/$file")
+  [ -z "$miss" ] || die "$file has no$miss in its titleblock" 1
+  why=$(still_skeleton "$root/$file")
+  [ -z "$why" ] || die "$file still carries $why" 1
+
+  # The index is shared, and a refusal must not leave the tree dirtier than it
+  # found it — so read the index BEFORE writing anything or staging anything.
+  for p in $($GIT -C "$root" diff --cached --name-only); do
+    case $p in
+      "$file"|docs/twowayflow/README.md) ;;
+      *) die "the index already holds $p, which this command did not name — commit or unstage it first" 2 ;;
+    esac
+  done
+
+  index_init "$index" "$(project_name "$root")"
+  index_upsert "$index" "$slug" "$(describe "$root/$file")"
+
+  $GIT -C "$root" add -- "$file" "docs/twowayflow/README.md" || die "git add failed" 2
+  for p in $($GIT -C "$root" diff --cached --name-only); do
+    case $p in
+      "$file"|docs/twowayflow/README.md) ;;
+      *) die "the index gained $p while this ran — another session is staging; stopping" 2 ;;
+    esac
+  done
+
+  # Nothing new to commit is not nothing to do: a previous run may have
+  # committed and then failed to push, or been asked for no pull request.
+  if $GIT -C "$root" diff --cached --quiet -- "$file" docs/twowayflow/README.md; then
+    printf 'nothing new to commit on %s; delivering what is already there\n' "$branch"
+  else
+    msg=$(mktemp) || die "could not write a commit message" 2
+    if ! { printf '%s\n' "$subject"
+           if [ -n "$bodyfile" ]; then printf '\n'; cat "$bodyfile"; fi
+           if [ "$attribution" = 1 ]; then
+             printf '\nCo-Authored-By: Claude Opus 5 <noreply@anthropic.com>\n'
+           fi
+         } > "$msg"; then
+      rm -f "$msg"; die "could not assemble the commit message" 2
+    fi
+    before=$($GIT -C "$root" rev-parse HEAD)
+    $GIT -C "$root" commit --quiet -F "$msg" -- "$file" docs/twowayflow/README.md ||
+      { rm -f "$msg"; die "commit failed" 2; }
+    rm -f "$msg"
+    [ "$before" != "$($GIT -C "$root" rev-parse HEAD)" ] ||
+      die "HEAD did not move — nothing was committed" 2
+    printf 'committed %s on %s\n' "$($GIT -C "$root" rev-parse --short HEAD)" "$branch"
+  fi
+
+  # Name the refspec. A bare push follows HEAD, which another session can move.
+  head=$($GIT -C "$root" rev-parse HEAD)
+  $GIT -C "$root" push --quiet -u origin "$branch" || die "push failed" 2
+  remote=$($GIT -C "$root" ls-remote --heads origin "$branch" | cut -f1)
+  [ "$remote" = "$head" ] ||
+    die "the server reports ${remote:-nothing} for $branch, not $head" 2
+  printf 'pushed, and the server agrees: %s\n' "$(printf '%s' "$head" | cut -c1-7)"
+
+  [ "$want_pr" = 1 ] || { printf 'no pull request asked for (--pr)\n'; return 0; }
+  command -v gh >/dev/null 2>&1 || die "gh is not installed; the branch is pushed" 2
+  if existing=$(cd "$root" && gh pr view "$branch" --json url --jq .url 2>/dev/null) &&
+     [ -n "$existing" ]; then
+    printf 'pull request already open: %s\n' "$existing"
+    return 0
+  fi
+  body=$(mktemp) || die "could not write a pull request body" 2
+  { printf '%s\n\n' "$(describe "$root/$file")"
+    # shellcheck disable=SC2016  # the backticks are markdown, not a subshell
+    printf 'Drawn into `%s`, on its own branch, with a titleblock.\n' "$file"
+    if [ "$attribution" = 1 ]; then
+      printf '\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n'
+    fi
+  } > "$body"
+  # gh reads the repository from the working directory; --repo wants OWNER/REPO.
+  ( cd "$root" && gh pr create --base "$(default_branch "$root")" --head "$branch" \
+      --title "$subject" --body-file "$body" ) || { rm -f "$body"; die "gh pr create failed" 2; }
+  rm -f "$body"
+}
+
+# --- dispatch -------------------------------------------------------------
+
+[ $# -ge 1 ] || usage 1
+sub=$1; shift
+case $sub in
+  start) cmd_start "$@" ;;
+  lint)  cmd_lint  "$@" ;;
+  land)  cmd_land  "$@" ;;
+  -h|--help|help) usage 0 ;;
+  *) die "unknown subcommand: $sub" ;;
+esac
