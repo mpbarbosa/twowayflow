@@ -103,6 +103,11 @@ the row to that folder's `README.md` index, commits only the two paths it named,
 branch by name, and checks the server agrees before saying so. Pass `--attribution` to add the
 Claude Code trailer to the commit and the pull request.
 
+Running it again is safe and is how you finish a run that failed halfway: with nothing new to
+commit it still pushes and still opens the pull request. If the index row no longer matches the
+titleblock it says so and leaves the row alone, because that row is prose someone may have
+improved by hand.
+
 Because each diagram branches from the default branch, two in flight will both add a row to the
 index table and conflict there on merge. Take both rows.
 
