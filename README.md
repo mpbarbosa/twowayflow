@@ -34,6 +34,7 @@ deliverable; the VS Code extension is a working demonstration of the loop, not a
 | [`packages/vscode-ext`](packages/vscode-ext) | VS Code extension: a `@xyflow/react` canvas in a webview, synced continuously with the text editor. |
 | [`examples/`](examples) | Four worked `.flow.ts` files — two synthetic, two projected from a real sibling project. |
 | [`docs/dsl.md`](docs/dsl.md) | The DSL surface syntax, and why it is patchable. |
+| [`scripts/twf-diagram`](scripts/twf-diagram) | The mechanical half of landing a diagram in a project you explored: the branch, the titleblock, the folder index row, the commit, the push and the PR. |
 
 ## Getting started
 
@@ -72,3 +73,39 @@ downloads a VS Code build on first use:
 ```bash
 pnpm run test:integration
 ```
+
+## Landing a diagram in a project you explored
+
+Everything produced by exploring a project with twowayflow belongs in **that project**, under
+its own `docs/twowayflow/`, on a branch of its own, carrying a titleblock that names the
+diagram, its type, the project and what it shows — so it stays readable when pulled out of the
+repository it describes.
+
+[`scripts/twf-diagram`](scripts/twf-diagram) does that ritual. The judgement — which notation,
+what claim it has to carry, whether it is worth drawing at all — is yours.
+
+```bash
+scripts/twf-diagram start ~/src/their-project turno-sequencia \
+  --title 'One turn in time' --type 'Sequence diagram — Mermaid' \
+  --desc 'One turn of POST /api/perguntar in time: the lock, and the guard that runs after its own fragments have left.'
+```
+
+That creates `docs/twowayflow-turno-sequencia` from the project's default branch and writes a
+skeleton with the titleblock filled in. Write the diagram into it, then:
+
+```bash
+scripts/twf-diagram lint ~/src/their-project
+scripts/twf-diagram land ~/src/their-project turno-sequencia -m "O turno em tempo" --pr
+```
+
+`land` refuses a titleblock missing a field or a body still carrying the skeleton marker, adds
+the row to that folder's `README.md` index, commits only the two paths it named, pushes the
+branch by name, and checks the server agrees before saying so. Pass `--attribution` to add the
+Claude Code trailer to the commit and the pull request.
+
+Because each diagram branches from the default branch, two in flight will both add a row to the
+index table and conflict there on merge. Take both rows.
+
+Exit codes are a contract: `0` did what was asked, `1` a usage error or a lint failure, `2`
+something a person must look at — a dirty tree, the wrong branch, an index holding paths the
+command did not name, or a push that did not land.
