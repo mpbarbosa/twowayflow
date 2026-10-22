@@ -62,10 +62,11 @@ const cases: Case[] = [
       assert.ok(extension().isActive, "the extension should be active after activate()");
 
       const commands = await vscode.commands.getCommands(true);
-      assert.ok(
-        commands.includes("twowayflow.openCanvas"),
-        "twowayflow.openCanvas should be registered",
-      );
+      // Every command `contributes.commands` declares, or the palette offers one that answers
+      // "command not found" — which no unit test can see.
+      for (const id of ["twowayflow.openCanvas", "twowayflow.newDiagramRequest"]) {
+        assert.ok(commands.includes(id), `${id} should be registered`);
+      }
     },
   ],
 
