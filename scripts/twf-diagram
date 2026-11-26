@@ -24,6 +24,9 @@ set -u
 WIDTH=95          # total box width, in characters
 LABEL=13          # label column, "Description" plus two spaces
 GIT=${TWF_GIT:-git}
+# The model name in the --attribution trailer changes with every release, so it
+# is a default to override, not something to edit here each time.
+COAUTHOR=${TWF_COAUTHOR:-'Claude Opus 5.5 <noreply@anthropic.com>'}
 
 me=${0##*/}
 
@@ -357,7 +360,7 @@ cmd_land() {
     if ! { printf '%s\n' "$subject"
            if [ -n "$bodyfile" ]; then printf '\n'; cat "$bodyfile"; fi
            if [ "$attribution" = 1 ]; then
-             printf '\nCo-Authored-By: Claude Opus 5 <noreply@anthropic.com>\n'
+             printf '\nCo-Authored-By: %s\n' "$COAUTHOR"
            fi
          } > "$msg"; then
       rm -f "$msg"; die "could not assemble the commit message" 2

@@ -115,7 +115,9 @@ scripts/twf-diagram land ~/src/their-project turno-sequencia -m "O turno em temp
 `land` refuses a titleblock missing a field or a body still carrying the skeleton marker, adds
 the row to that folder's `README.md` index, commits only the two paths it named, pushes the
 branch by name, and checks the server agrees before saying so. Pass `--attribution` to add the
-Claude Code trailer to the commit and the pull request.
+Claude Code trailer to the commit and the pull request. The commit's `Co-Authored-By` names
+`Claude Opus 5.5 <noreply@anthropic.com>` unless `TWF_COAUTHOR` says otherwise, so a new model
+name is an environment variable, not an edit to the script.
 
 Running it again is safe and is how you finish a run that failed halfway: with nothing new to
 commit it still pushes and still opens the pull request. If the index row no longer matches the
